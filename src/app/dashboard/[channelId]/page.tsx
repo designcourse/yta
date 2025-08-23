@@ -1,11 +1,19 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import Link from "next/link";
+import YouTubeStats from "@/components/YouTubeStats";
 
-export default async function DashboardPage() {
+export default async function ChannelDashboardPage({
+  params,
+}: {
+  params: Promise<{ channelId: string }>;
+}) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  
+  const resolvedParams = await params;
+  const selectedChannelId = decodeURIComponent(resolvedParams.channelId);
 
   if (!user) {
     return (
@@ -32,7 +40,9 @@ export default async function DashboardPage() {
             <Link 
               key={c.id} 
               href={`/dashboard/${encodeURIComponent(c.channel_id)}`} 
-              className="px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
+              className={`px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/10 ${
+                selectedChannelId === c.channel_id ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : ''
+              }`}
             >
               {c.title || c.channel_id}
             </Link>
@@ -43,10 +53,7 @@ export default async function DashboardPage() {
         </nav>
       </aside>
       <main className="p-6">
-        <div>
-          <h1 className="text-2xl font-semibold">Your Dashboard</h1>
-          <p className="mt-2 text-sm opacity-80">Select a channel from the left to view detailed analytics for the last 90 days.</p>
-        </div>
+        <YouTubeStats channelId={selectedChannelId} />
       </main>
       
       <script dangerouslySetInnerHTML={{
