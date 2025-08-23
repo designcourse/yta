@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
+import { getValidAccessToken } from "@/utils/googleAuth";
 
 export async function GET() {
   try {
@@ -11,24 +12,19 @@ export async function GET() {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // Get the user's Google access token from our database
-    const admin = createSupabaseAdminClient();
-    const { data: googleAccount } = await admin
-      .from("google_accounts")
-      .select("access_token, refresh_token")
-      .eq("user_id", user.id)
-      .single();
+    // Get a valid access token (refreshing if necessary)
+    const tokenResult = await getValidAccessToken(user.id);
 
-    if (!googleAccount?.access_token) {
-      return NextResponse.json({ error: "No Google access token found" }, { status: 400 });
+    if (!tokenResult.success) {
+      return NextResponse.json({ error: tokenResult.error || "No Google access token found" }, { status: 400 });
     }
 
-    // Get YouTube channels using the existing access token
+    // Get YouTube channels using the valid access token
     const channelsResponse = await fetch(
       "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true",
       { 
         headers: { 
-          Authorization: `Bearer ${googleAccount.access_token}`,
+          Authorization: `Bearer ${tokenResult.accessToken}`,
           'Content-Type': 'application/json'
         } 
       }

@@ -28,6 +28,13 @@ interface YouTubeStatsProps {
   channelId: string;
 }
 
+interface ChannelInfo {
+  title: string;
+  subscriberCount: number;
+  videoCount: number;
+  viewCount: number;
+}
+
 const formatNumber = (num: number): string => {
   if (num >= 1000000) {
     return (num / 1000000).toFixed(1) + 'M';
@@ -57,6 +64,7 @@ export default function YouTubeStats({ channelId }: YouTubeStatsProps) {
   const [dateRange, setDateRange] = useState<DateRange | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [channelInfo, setChannelInfo] = useState<ChannelInfo | null>(null);
 
   useEffect(() => {
     async function fetchStats() {
@@ -74,6 +82,10 @@ export default function YouTubeStats({ channelId }: YouTubeStatsProps) {
           setDateRange(data.dateRange);
         } else {
           setError(data.error || 'Failed to fetch stats');
+          // If we have basic channel info even with an error, store it
+          if (data.channelInfo) {
+            setChannelInfo(data.channelInfo);
+          }
         }
       } catch (err) {
         setError('Network error');
@@ -105,6 +117,7 @@ export default function YouTubeStats({ channelId }: YouTubeStatsProps) {
 
   if (error) {
     const isTokenError = error.includes('access token');
+    const isAnalyticsError = error.includes("doesn't have YouTube Analytics access");
     
     return (
       <div className="text-center py-8">
@@ -127,6 +140,33 @@ export default function YouTubeStats({ channelId }: YouTubeStatsProps) {
             >
               Reconnect YouTube
             </button>
+          </div>
+        )}
+        {isAnalyticsError && (
+          <div className="space-y-4 max-w-md mx-auto">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              This typically happens with Brand Accounts or channels that don't have analytics enabled. 
+              Here's the basic channel information that's available:
+            </p>
+            {channelInfo && (
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4">
+                <h3 className="font-medium mb-3">{channelInfo.title}</h3>
+                <div className="grid grid-cols-1 gap-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Subscribers:</span>
+                    <span className="font-medium">{formatNumber(parseInt(channelInfo.subscriberCount.toString()))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Total Videos:</span>
+                    <span className="font-medium">{formatNumber(parseInt(channelInfo.videoCount.toString()))}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Total Views:</span>
+                    <span className="font-medium">{formatNumber(parseInt(channelInfo.viewCount.toString()))}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

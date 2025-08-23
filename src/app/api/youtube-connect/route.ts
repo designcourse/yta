@@ -57,26 +57,75 @@ export async function POST(request: Request) {
 
     const admin = createSupabaseAdminClient();
 
-    // Update google_accounts with YouTube tokens for ORIGINAL user
-    await admin.from("google_accounts").update({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    }).eq("user_id", originalUserId);
+    // Get the Google account info for this specific set of channels
+    // We need to identify which Google account these channels belong to
+    let googleSubId = null;
+    try {
+      // Get user info from Google to identify the account
+      const userInfoResponse = await fetch(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      
+      if (userInfoResponse.ok) {
+        const userInfo = await userInfoResponse.json();
+        googleSubId = userInfo.id;
+        console.log("Google account ID for channels:", googleSubId);
+      }
+    } catch (error) {
+      console.error("Failed to get Google user info:", error);
+    }
 
-    console.log("Updated tokens for ORIGINAL user:", originalUserId);
+    // Create or update a Google account record for this specific Google account
+    if (googleSubId) {
+      await admin.from("google_accounts").upsert(
+        {
+          user_id: originalUserId,
+          google_sub: googleSubId,
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        },
+        { onConflict: "user_id,google_sub" }
+      );
+      console.log("Updated tokens for Google account:", googleSubId);
+    } else {
+      // Fallback: update the user's primary Google account
+      await admin.from("google_accounts").update({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      }).eq("user_id", originalUserId);
+      console.log("Updated tokens for primary Google account");
+    }
 
-    // Add channels for ORIGINAL user
+    // Add channels for ORIGINAL user, storing which Google account they belong to
     for (const channel of channels) {
-      const result = await admin.from("channels").upsert(
+      // First try with google_sub field
+      let result = await admin.from("channels").upsert(
         {
           user_id: originalUserId,
           channel_id: channel.id,
           title: channel.snippet?.title ?? null,
           thumbnails: channel.snippet?.thumbnails ?? null,
+          google_sub: googleSubId, // Store which Google account this channel belongs to
         },
         { onConflict: "user_id,channel_id" }
       );
-      console.log("Added channel for ORIGINAL user:", channel.snippet?.title, result.error ? result.error : "success");
+
+      // If that fails (maybe google_sub column doesn't exist), try without it
+      if (result.error && result.error.message?.includes('google_sub')) {
+        console.log("google_sub column doesn't exist, trying without it for channel:", channel.snippet?.title);
+        result = await admin.from("channels").upsert(
+          {
+            user_id: originalUserId,
+            channel_id: channel.id,
+            title: channel.snippet?.title ?? null,
+            thumbnails: channel.snippet?.thumbnails ?? null,
+          },
+          { onConflict: "user_id,channel_id" }
+        );
+      }
+
+      console.log("Added channel for ORIGINAL user:", channel.snippet?.title, result.error ? result.error.message : "success");
     }
 
     return NextResponse.json({ success: true, channelsAdded: channels.length });

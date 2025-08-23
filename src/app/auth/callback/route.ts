@@ -21,14 +21,22 @@ export async function GET(request: Request) {
           const googleIdentity = user.identities?.find((i) => i.provider === "google");
           const googleSub = (googleIdentity?.identity_data as any)?.sub as string | undefined;
 
-          // Store/update the Google account WITHOUT YouTube tokens - just basic info
+          // Check if the user already has YouTube tokens
+          const { data: existingAccount } = await admin
+            .from("google_accounts")
+            .select("access_token, refresh_token")
+            .eq("user_id", user.id)
+            .single();
+
+          // Store/update the Google account, preserving existing YouTube tokens if they exist
           await admin.from("google_accounts").upsert(
             {
               user_id: user.id,
               google_sub: googleSub ?? "",
               account_email: user.email ?? undefined,
-              access_token: null,
-              refresh_token: null,
+              // Preserve existing tokens if they exist, otherwise set to null
+              access_token: existingAccount?.access_token || null,
+              refresh_token: existingAccount?.refresh_token || null,
             },
             { onConflict: "google_sub,user_id" }
           );

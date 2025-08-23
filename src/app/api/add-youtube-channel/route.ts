@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
+import { getValidAccessToken } from "@/utils/googleAuth";
 
 export async function POST(request: Request) {
   try {
@@ -18,16 +19,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // Get the user's Google access token
-    const admin = createSupabaseAdminClient();
-    const { data: googleAccount } = await admin
-      .from("google_accounts")
-      .select("access_token")
-      .eq("user_id", user.id)
-      .single();
+    // Get a valid access token (refreshing if necessary)
+    const tokenResult = await getValidAccessToken(user.id);
 
-    if (!googleAccount?.access_token) {
-      return NextResponse.json({ error: "No Google access token found" }, { status: 400 });
+    if (!tokenResult.success) {
+      return NextResponse.json({ error: tokenResult.error || "No Google access token found" }, { status: 400 });
+    }
+
+    // Get the Google account info first to determine which account will own this channel
+    let googleSubId = null;
+    try {
+      const userInfoResponse = await fetch(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        { headers: { Authorization: `Bearer ${tokenResult.accessToken}` } }
+      );
+      
+      if (userInfoResponse.ok) {
+        const userInfo = await userInfoResponse.json();
+        googleSubId = userInfo.id;
+        console.log("Google account ID for channel:", googleSubId);
+      }
+    } catch (error) {
+      console.error("Failed to get Google user info:", error);
     }
 
     // Get channel details from YouTube API
@@ -35,7 +48,7 @@ export async function POST(request: Request) {
       `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}`,
       { 
         headers: { 
-          Authorization: `Bearer ${googleAccount.access_token}`,
+          Authorization: `Bearer ${tokenResult.accessToken}`,
           'Content-Type': 'application/json'
         } 
       }
@@ -53,19 +66,41 @@ export async function POST(request: Request) {
     }
 
     // Add channel to database
-    const { error } = await admin.from("channels").upsert(
+    const admin = createSupabaseAdminClient();
+    
+    // First try with google_sub field
+    let { error } = await admin.from("channels").upsert(
       {
         user_id: user.id,
         channel_id: channelId,
         title: channel.snippet?.title ?? null,
         thumbnails: channel.snippet?.thumbnails ?? null,
+        google_sub: googleSubId, // Store which Google account this channel belongs to
       },
       { onConflict: "user_id,channel_id" }
     );
 
+    // If that fails (maybe google_sub column doesn't exist), try without it
+    if (error && error.message?.includes('google_sub')) {
+      console.log("google_sub column doesn't exist, trying without it");
+      const result = await admin.from("channels").upsert(
+        {
+          user_id: user.id,
+          channel_id: channelId,
+          title: channel.snippet?.title ?? null,
+          thumbnails: channel.snippet?.thumbnails ?? null,
+        },
+        { onConflict: "user_id,channel_id" }
+      );
+      error = result.error;
+    }
+
     if (error) {
       console.error("Database error:", error);
-      return NextResponse.json({ error: "Failed to save channel" }, { status: 500 });
+      return NextResponse.json({ 
+        error: "Failed to save channel", 
+        details: error.message 
+      }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, channel: channel.snippet });

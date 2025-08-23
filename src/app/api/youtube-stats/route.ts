@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
+import { getValidAccessToken } from "@/utils/googleAuth";
 
 export async function GET(request: Request) {
   try {
@@ -18,29 +19,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
-    // Get the user's Google access token from our database
-    const admin = createSupabaseAdminClient();
-    const { data: googleAccount, error: accountError } = await admin
-      .from("google_accounts")
-      .select("access_token, refresh_token")
-      .eq("user_id", user.id)
-      .single();
+    // Get a valid access token (refreshing if necessary)
+    console.log("Getting valid access token for user:", user.id, "channel:", channelId);
+    const tokenResult = await getValidAccessToken(user.id, channelId);
 
-    console.log("User ID:", user.id);
-    console.log("Google account query error:", accountError);
-    console.log("Google account found:", !!googleAccount);
-    console.log("Has access token:", !!googleAccount?.access_token);
-
-    if (!googleAccount?.access_token) {
+    if (!tokenResult.success) {
+      console.log("Token validation failed:", tokenResult.error);
       return NextResponse.json({ 
-        error: "No Google access token found", 
+        error: tokenResult.error || "No Google access token found", 
         debug: {
           userId: user.id,
-          accountFound: !!googleAccount,
-          accountError: accountError?.message
         }
       }, { status: 400 });
     }
+
+    const accessToken = tokenResult.accessToken;
 
     // Calculate date range for last 90 days
     const endDate = new Date();
@@ -64,26 +57,40 @@ export async function GET(request: Request) {
       `https://youtubeanalytics.googleapis.com/v2/reports?${metricsParams}`,
       { 
         headers: { 
-          Authorization: `Bearer ${googleAccount.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         } 
       }
     );
 
+    let analyticsData = null;
+    let analyticsError = null;
+    
     if (!analyticsResponse.ok) {
       const error = await analyticsResponse.text();
       console.error("YouTube Analytics API failed:", error);
-      return NextResponse.json({ error: "Failed to fetch analytics data" }, { status: 400 });
+      analyticsError = error;
+      
+      // Try to parse the error for specific handling
+      try {
+        const errorData = JSON.parse(error);
+        if (errorData.error?.code === 403) {
+          analyticsError = "This channel doesn't have YouTube Analytics access enabled or you don't have permission to view its analytics. This can happen with Brand Accounts or channels that haven't enabled analytics.";
+        }
+      } catch (parseError) {
+        // If we can't parse the error, use the raw error
+        analyticsError = "Failed to fetch analytics data";
+      }
+    } else {
+      analyticsData = await analyticsResponse.json();
     }
 
-    const analyticsData = await analyticsResponse.json();
-
-    // Also get current subscriber count from the channel data
+    // Get current subscriber count from the channel data (this should always work)
     const channelResponse = await fetch(
       `https://www.googleapis.com/youtube/v3/channels?part=statistics,snippet&id=${channelId}`,
       { 
         headers: { 
-          Authorization: `Bearer ${googleAccount.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         } 
       }
@@ -95,9 +102,23 @@ export async function GET(request: Request) {
       channelData = channelResult.items?.[0];
     }
 
+    // If analytics failed but we have basic channel data, return an error with the channel info
+    if (analyticsError) {
+      return NextResponse.json({ 
+        error: analyticsError,
+        isAnalyticsError: true,
+        channelInfo: channelData ? {
+          title: channelData.snippet?.title || 'Unknown Channel',
+          subscriberCount: channelData.statistics?.subscriberCount || 0,
+          videoCount: channelData.statistics?.videoCount || 0,
+          viewCount: channelData.statistics?.viewCount || 0,
+        } : null
+      }, { status: 400 });
+    }
+
     // Process the analytics data
-    const rows = analyticsData.rows?.[0] || [];
-    const columnHeaders = analyticsData.columnHeaders || [];
+    const rows = analyticsData?.rows?.[0] || [];
+    const columnHeaders = analyticsData?.columnHeaders || [];
     
     const stats = {
       views: 0,
