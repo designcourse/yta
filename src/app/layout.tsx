@@ -31,9 +31,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SplineBackground />
-        <div className="relative z-10 pointer-events-none min-h-screen flex flex-col">
+        <div className="relative z-10 pointer-events-none h-screen flex flex-col">
           <Header />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 overflow-hidden">{children}</main>
           <Footer />
         </div>
       </body>

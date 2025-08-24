@@ -8,38 +8,35 @@ interface CollectionHeroProps {
 
 export default function CollectionHero({ neriaResponse }: CollectionHeroProps) {
   return (
-    <div
-      className="box-border content-stretch flex flex-col gap-3 items-start justify-start px-[309px] py-[258px] relative w-full"
-      data-name="Onboarding Hero"
-      data-node-id="9:91"
-    >
-      {/* Neria Response Animation */}
-      {neriaResponse && (
-        <div className="w-full mb-8">
-          <NeriaResponse response={neriaResponse} isVisible={true} />
-        </div>
-      )}
-
+    <>
       <div
-        className="content-stretch flex flex-col font-normal gap-6 items-end justify-start leading-[0] relative shrink-0 text-[#000000] text-right"
-        data-name="Status Container"
-        data-node-id="10:116"
+        className="box-border content-stretch flex flex-col gap-3 items-start justify-start px-[4%] sm:px-[6%] md:px-[8%] lg:px-[10%] py-[4%] sm:py-[6%] md:py-[8%] relative w-full"
+        data-name="Onboarding Hero"
+        data-node-id="9:91"
       >
-        <div
-          className="relative shrink-0 text-[40px] w-full font-mono"
-          data-node-id="10:106"
-          style={{ fontVariationSettings: "'wdth' 100" }}
-        >
-          <p className="leading-[normal]">COLLECTING DATA</p>
-        </div>
-        <div
-          className="not-italic relative shrink-0 text-[16px] w-full"
-          data-node-id="10:114"
-        >
-          <p className="leading-[normal]">This may take a couple minutes..</p>
+        {/* Neria Response Animation */}
+        {neriaResponse && (
+          <div className="w-full mb-8">
+            <NeriaResponse response={neriaResponse} isVisible={true} />
+          </div>
+        )}
+      </div>
+
+      {/* Fixed bottom-left status indicator */}
+      <div className="fixed bottom-20 left-20 z-50 pointer-events-none">
+        <div className="flex flex-col gap-2 text-left">
+          <div
+            className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-mono text-black"
+            style={{ fontVariationSettings: "'wdth' 100" }}
+          >
+            COLLECTING DATA
+          </div>
+          <div className="text-sm sm:text-base md:text-lg lg:text-xl text-gray-700">
+            This may take a couple minutes..
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

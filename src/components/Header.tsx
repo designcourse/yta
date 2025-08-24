@@ -8,25 +8,30 @@ import { createSupabaseBrowserClient } from "@/utils/supabase/client";
 export default function Header() {
   const supabase = createSupabaseBrowserClient();
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
+    setMounted(true);
+    let componentMounted = true;
+
     supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
+      if (!componentMounted) return;
       setIsSignedIn(!!data.session);
     });
+
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsSignedIn(!!session);
     });
+
     return () => {
-      mounted = false;
+      componentMounted = false;
       listener.subscription.unsubscribe();
     };
   }, [supabase]);
 
   return (
-    <header className="pointer-events-auto p-12">
-      <div className="flex items-center justify-between">
+    <header className="pointer-events-auto p-12 h-20 flex items-center">
+      <div className="flex items-center justify-between w-full">
         <Link href="/" className="flex items-center gap-3" aria-label="Home">
           <Image
             src={"/figma/1dfe67554ca7f3ba9d90033c44cc1cc16941b0a2.svg"}
@@ -37,7 +42,10 @@ export default function Header() {
           />
         </Link>
 
-        {!isSignedIn ? (
+        {!mounted ? (
+          // Loading state during hydration
+          <div className="w-20 h-8 bg-gray-200 animate-pulse rounded"></div>
+        ) : !isSignedIn ? (
           <button
             className="inline-flex items-center gap-2 text-[19px] font-bold text-black"
             onClick={async () => {
