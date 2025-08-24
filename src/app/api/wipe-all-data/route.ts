@@ -13,6 +13,34 @@ export async function POST(request: Request) {
 
     const admin = createSupabaseAdminClient();
 
+    // First get all channel IDs for the user
+    const { data: userChannels } = await admin
+      .from("channels")
+      .select("id")
+      .eq("user_id", user.id);
+
+    // Delete all neria_context records for the user's channels
+    if (userChannels && userChannels.length > 0) {
+      const channelIds = userChannels.map(channel => channel.id);
+      console.log(`🗑️ Deleting neria_context records for ${channelIds.length} channels`);
+      const { error: neriaContextError } = await admin
+        .from("neria_context")
+        .delete()
+        .in("channel_id", channelIds);
+
+      if (neriaContextError) {
+        console.error("❌ Error deleting neria context:", neriaContextError);
+        return NextResponse.json({
+          error: "Failed to delete neria context",
+          details: neriaContextError.message
+        }, { status: 500 });
+      } else {
+        console.log("✅ Successfully deleted neria_context records");
+      }
+    } else {
+      console.log("ℹ️ No channels found for user, skipping neria_context deletion");
+    }
+
     // Delete all channels for the user
     const { error: channelsError } = await admin
       .from("channels")

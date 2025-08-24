@@ -4,11 +4,13 @@ import { useState, useEffect } from 'react';
 import { createSupabaseBrowserClient } from '@/utils/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import CollectionHero from '@/components/CollectionHero';
+import NeriaResponse from '@/components/NeriaResponse';
 
 export default function CollectionPage() {
   const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [channelData, setChannelData] = useState<any>(null);
+  const [neriaResponse, setNeriaResponse] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,6 +48,7 @@ export default function CollectionPage() {
 
       const data = await response.json();
       setChannelData(data);
+      setNeriaResponse(data.neriaResponse || null);
       setStep(2);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
@@ -59,6 +62,9 @@ export default function CollectionPage() {
       case 1:
         return (
           <div className="text-center space-y-6">
+            {/* Show Neria response above collecting data */}
+            <NeriaResponse response={neriaResponse || ''} isVisible={!!neriaResponse} />
+
             <div className="animate-pulse">
               <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
             </div>
@@ -127,7 +133,10 @@ export default function CollectionPage() {
 
   return (
     <>
-      <CollectionHero />
+      <CollectionHero neriaResponse={neriaResponse} />
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 flex items-center justify-center p-4">
+        {renderStepContent()}
+      </div>
     </>
   );
 }
