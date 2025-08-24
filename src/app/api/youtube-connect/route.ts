@@ -60,6 +60,8 @@ export async function POST(request: Request) {
     // Get the Google account info for this specific set of channels
     // We need to identify which Google account these channels belong to
     let googleSubId = null;
+    let accountName: string | undefined;
+    let givenName: string | undefined;
     try {
       // Get user info from Google to identify the account
       const userInfoResponse = await fetch(
@@ -70,6 +72,8 @@ export async function POST(request: Request) {
       if (userInfoResponse.ok) {
         const userInfo = await userInfoResponse.json();
         googleSubId = userInfo.id;
+        accountName = userInfo.name;
+        givenName = userInfo.given_name;
         console.log("Google account ID for channels:", googleSubId);
       }
     } catch (error) {
@@ -78,15 +82,27 @@ export async function POST(request: Request) {
 
     // Create or update a Google account record for this specific Google account
     if (googleSubId) {
-      await admin.from("google_accounts").upsert(
-        {
-          user_id: originalUserId,
-          google_sub: googleSubId,
-          access_token: accessToken,
-          refresh_token: refreshToken,
-        },
-        { onConflict: "user_id,google_sub" }
-      );
+      const payload: any = {
+        user_id: originalUserId,
+        google_sub: googleSubId,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      };
+      if (accountName) payload.account_name = accountName;
+      if (givenName) payload.given_name = givenName;
+
+      let { error: upsertError } = await admin
+        .from("google_accounts")
+        .upsert(payload, { onConflict: "user_id,google_sub" });
+
+      if (upsertError && (upsertError.message?.includes("account_name") || upsertError.message?.includes("given_name"))) {
+        delete payload.account_name;
+        delete payload.given_name;
+        const retry = await admin
+          .from("google_accounts")
+          .upsert(payload, { onConflict: "user_id,google_sub" });
+        upsertError = retry.error;
+      }
       console.log("Updated tokens for Google account:", googleSubId);
     } else {
       // Fallback: update the user's primary Google account

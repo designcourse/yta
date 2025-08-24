@@ -20,6 +20,9 @@ export async function GET(request: Request) {
         if (user) {
           const googleIdentity = user.identities?.find((i) => i.provider === "google");
           const googleSub = (googleIdentity?.identity_data as any)?.sub as string | undefined;
+          const identityData = googleIdentity?.identity_data as any;
+          const accountName = identityData?.name || (user.user_metadata as any)?.full_name;
+          const givenName = identityData?.given_name || (user.user_metadata as any)?.name?.split?.(" ")?.[0];
 
           // Check if the user already has YouTube tokens
           const { data: existingAccount } = await admin
@@ -29,17 +32,31 @@ export async function GET(request: Request) {
             .single();
 
           // Store/update the Google account, preserving existing YouTube tokens if they exist
-          await admin.from("google_accounts").upsert(
-            {
-              user_id: user.id,
-              google_sub: googleSub ?? "",
-              account_email: user.email ?? undefined,
-              // Preserve existing tokens if they exist, otherwise set to null
-              access_token: existingAccount?.access_token || null,
-              refresh_token: existingAccount?.refresh_token || null,
-            },
-            { onConflict: "google_sub,user_id" }
-          );
+          const basePayload: any = {
+            user_id: user.id,
+            google_sub: googleSub ?? "",
+            account_email: user.email ?? undefined,
+            // Preserve existing tokens if they exist, otherwise set to null
+            access_token: existingAccount?.access_token || null,
+            refresh_token: existingAccount?.refresh_token || null,
+          };
+
+          if (accountName) basePayload.account_name = accountName;
+          if (givenName) basePayload.given_name = givenName;
+
+          let { error: upsertError } = await admin
+            .from("google_accounts")
+            .upsert(basePayload, { onConflict: "google_sub,user_id" });
+
+          if (upsertError && (upsertError.message?.includes("account_name") || upsertError.message?.includes("given_name"))) {
+            // Retry without name fields if columns don't exist yet
+            delete basePayload.account_name;
+            delete basePayload.given_name;
+            const retry = await admin
+              .from("google_accounts")
+              .upsert(basePayload, { onConflict: "google_sub,user_id" });
+            upsertError = retry.error;
+          }
           
           console.log("Stored basic Google account for:", user.email);
         }

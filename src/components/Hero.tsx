@@ -11,7 +11,7 @@ function useStaggeredChars(text: string) {
 
 export default function Hero() {
   const line1 = useStaggeredChars("Hi, I’m Neria.");
-  const line2 = useStaggeredChars("Think of me as your personal YouTube coach.");
+  const line2 = useStaggeredChars("Think of me as your AI-Powered YouTube coach.");
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
