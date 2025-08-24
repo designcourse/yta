@@ -32,27 +32,27 @@ export default async function ChannelDashboardPage({
     .order("created_at", { ascending: true });
 
   return (
-    <div className="min-h-screen grid grid-cols-[240px_1fr]">
-      <aside className="border-r border-black/10 dark:border-white/10 p-4 space-y-2">
-        <div className="text-sm font-semibold mb-2">Navigation</div>
+    <div className="min-h-screen grid grid-cols-[240px_1fr] pointer-events-none">
+      <aside className="border-r border-black/10 p-4 space-y-2 bg-white/80 backdrop-blur-sm pointer-events-auto">
+        <div className="text-sm font-semibold mb-2 text-black">Navigation</div>
         <nav className="flex flex-col gap-1">
           {(channels ?? []).map((c) => (
             <Link 
               key={c.id} 
               href={`/dashboard/${encodeURIComponent(c.channel_id)}`} 
-              className={`px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/10 ${
-                selectedChannelId === c.channel_id ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : ''
+              className={`px-2 py-1 rounded hover:bg-black/5 text-black ${
+                selectedChannelId === c.channel_id ? 'bg-blue-100 text-blue-700' : ''
               }`}
             >
               {c.title || c.channel_id}
             </Link>
           ))}
-          <button id="connect-youtube-btn" className="px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-left">
+          <button id="connect-youtube-btn" className="px-2 py-1 rounded hover:bg-black/5 text-left text-black">
             Connect YouTube channel
           </button>
         </nav>
       </aside>
-      <main className="p-6">
+      <main className="p-6 bg-white/80 backdrop-blur-sm pointer-events-auto">
         <YouTubeStats channelId={selectedChannelId} />
       </main>
       

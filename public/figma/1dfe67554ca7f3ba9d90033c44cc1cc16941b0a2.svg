@@ -1,0 +1,14 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 100 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Logo" clip-path="url(#clip0_5_45)">
+<path id="Vector" d="M0 14V0L18.1831 9.12054V0H21.2136V14L3.03051 5.05011V13.9937H0V14Z" fill="var(--fill-0, black)"/>
+<path id="Vector_2" d="M45.4577 2.8H27.2746V11.2H45.4577V14H27.2746C25.2565 14 24.2441 13.0646 24.2441 11.2V2.8C24.2441 0.93544 25.2565 0 27.2746 0H45.4577V2.8ZM45.4577 8.4H30.3051V5.6H45.4577V8.4Z" fill="var(--fill-0, black)"/>
+<path id="Vector_3" d="M51.5118 14H48.4813V0H66.6644C68.6824 0 69.6949 0.93544 69.6949 2.8V5.6C69.6949 7.46456 68.703 8.4 66.7123 8.4H63.6339L69.6949 14H65.905L59.844 8.4H54.5423V5.6H66.6644V2.8H51.5118V14Z" fill="var(--fill-0, black)"/>
+<path id="Vector_4" d="M75.7559 0V14H72.7254V0H75.7559Z" fill="var(--fill-0, black)"/>
+<path id="Vector_5" d="M81.8169 14H78.7864V2.8C78.7864 0.93544 79.7989 0 81.8169 0H96.9695C98.9875 0 100 0.93544 100 2.8V14H96.9695V8.4H84.8474V5.6H96.9695V2.8H81.8169V14Z" fill="var(--fill-0, black)"/>
+</g>
+<defs>
+<clipPath id="clip0_5_45">
+<rect width="100" height="14" fill="white"/>
+</clipPath>
+</defs>
+</svg>

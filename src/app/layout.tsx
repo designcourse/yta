@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import AuthButtons from "@/components/AuthButtons";
+import SplineBackground from "@/components/SplineBackground";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,13 +30,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <header className="border-b border-black/10 dark:border-white/10 p-4">
-          <div className="max-w-7xl mx-auto flex justify-between items-center">
-            <h1 className="font-semibold">YouTube Analytics</h1>
-            <AuthButtons />
-          </div>
-        </header>
-        {children}
+        <SplineBackground />
+        <div className="relative z-10 pointer-events-none min-h-screen flex flex-col">
+          <Header />
+          <main className="flex-1 flex items-center justify-center">{children}</main>
+          <Footer />
+        </div>
       </body>
     </html>
   );

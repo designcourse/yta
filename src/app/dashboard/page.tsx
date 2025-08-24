@@ -24,28 +24,28 @@ export default async function DashboardPage() {
     .order("created_at", { ascending: true });
 
   return (
-    <div className="min-h-screen grid grid-cols-[240px_1fr]">
-      <aside className="border-r border-black/10 dark:border-white/10 p-4 space-y-2">
-        <div className="text-sm font-semibold mb-2">Navigation</div>
+    <div className="min-h-screen grid grid-cols-[240px_1fr] pointer-events-none">
+      <aside className="border-r border-black/10 p-4 space-y-2 bg-white/80 backdrop-blur-sm pointer-events-auto">
+        <div className="text-sm font-semibold mb-2 text-black">Navigation</div>
         <nav className="flex flex-col gap-1">
           {(channels ?? []).map((c) => (
             <Link 
               key={c.id} 
               href={`/dashboard/${encodeURIComponent(c.channel_id)}`} 
-              className="px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/10"
+              className="px-2 py-1 rounded hover:bg-black/5 text-black"
             >
               {c.title || c.channel_id}
             </Link>
           ))}
-          <button id="connect-youtube-btn" className="px-2 py-1 rounded hover:bg-black/5 dark:hover:bg-white/10 text-left">
+          <button id="connect-youtube-btn" className="px-2 py-1 rounded hover:bg-black/5 text-left text-black">
             Connect YouTube channel
           </button>
         </nav>
       </aside>
-      <main className="p-6">
+      <main className="p-6 bg-white/80 backdrop-blur-sm pointer-events-auto">
         <div>
-          <h1 className="text-2xl font-semibold">Your Dashboard</h1>
-          <p className="mt-2 text-sm opacity-80">Select a channel from the left to view detailed analytics for the last 90 days.</p>
+          <h1 className="text-2xl font-semibold text-black">Your Dashboard</h1>
+          <p className="mt-2 text-sm opacity-80 text-black">Select a channel from the left to view detailed analytics for the last 90 days.</p>
         </div>
       </main>
       
