@@ -130,9 +130,16 @@ export default function YouTubeStats({ channelId }: YouTubeStatsProps) {
               onClick={() => {
                 const popup = window.open('/youtube-connect', 'youtube', 'width=500,height=600');
                 window.addEventListener('message', function(event) {
-                  if (event.data === 'youtube-connected') {
+                  if (event.data && event.data.type === 'youtube-connected') {
                     popup?.close();
-                    window.location.reload();
+                    const channelIds = event.data.channelIds;
+                    if (channelIds && channelIds.length > 0) {
+                      // Redirect to collection page with the first channel
+                      window.location.href = '/dashboard/collection?channelId=' + encodeURIComponent(channelIds[0]);
+                    } else {
+                      // Fallback to reload if no channel IDs
+                      window.location.reload();
+                    }
                   }
                 });
               }}

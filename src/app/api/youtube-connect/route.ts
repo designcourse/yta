@@ -144,7 +144,13 @@ export async function POST(request: Request) {
       console.log("Added channel for ORIGINAL user:", channel.snippet?.title, result.error ? result.error.message : "success");
     }
 
-    return NextResponse.json({ success: true, channelsAdded: channels.length });
+    // Return the channel IDs that were added
+    const channelIds = channels.map(channel => channel.id);
+    return NextResponse.json({
+      success: true,
+      channelsAdded: channels.length,
+      channelIds: channelIds
+    });
   } catch (error) {
     console.error("YouTube connect error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

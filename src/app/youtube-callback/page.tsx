@@ -36,21 +36,34 @@ export default function YouTubeCallbackPage() {
         });
 
         if (response.ok) {
+          const responseData = await response.json();
+          const { channelIds } = responseData;
+
           setStatus("Success! Processing...");
 
           // Check if we're in a popup window
           const isPopup = window.opener && window.opener !== window;
 
           if (isPopup && window.opener) {
-            // We're in a popup - notify parent and close
-            window.opener.postMessage("youtube-connected", "*");
+            // We're in a popup - notify parent with channel IDs and close
+            window.opener.postMessage({
+              type: "youtube-connected",
+              channelIds: channelIds
+            }, "*");
             setTimeout(() => window.close(), 1000);
           } else {
-            // We're in the main window - redirect to dashboard
-            setStatus("Success! Redirecting to dashboard...");
-            setTimeout(() => {
-              window.location.href = '/dashboard';
-            }, 2000);
+            // We're in the main window - redirect to collection page if we have channels
+            if (channelIds && channelIds.length > 0) {
+              setStatus("Success! Redirecting to data collection...");
+              setTimeout(() => {
+                window.location.href = `/dashboard/collection?channelId=${channelIds[0]}`;
+              }, 2000);
+            } else {
+              setStatus("Success! Redirecting to dashboard...");
+              setTimeout(() => {
+                window.location.href = '/dashboard';
+              }, 2000);
+            }
           }
         } else {
           const error = await response.text();

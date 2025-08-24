@@ -110,12 +110,12 @@ export default function Hero() {
           <Link
             href="/youtube-connect"
             className="bg-black text-white rounded-full px-14 py-6 flex items-center gap-5 transition"
-            aria-label="Connect your channel"
+            aria-label="Get Started"
           >
             <span className="inline-grid place-items-center w-[31px] h-[22px] overflow-hidden" aria-hidden="true">
               <YouTubeIcon className="w-full h-full" />
             </span>
-            <span className="text-[clamp(20px,1.4vw,28px)] font-bold">Connect your channel</span>
+            <span className="text-[clamp(20px,1.4vw,28px)] font-bold">Get Started</span>
           </Link>
           <span className="text-xs text-black">Is this safe?</span>
         </div>

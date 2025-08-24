@@ -174,13 +174,19 @@ export default function OnboardHero() {
             onClick={() => {
               const popup = window.open('/youtube-connect', 'youtube', 'width=500,height=600');
               if (popup) {
-                window.addEventListener('message', function(event) {
-                  if (event.data === 'youtube-connected') {
-                    popup.close();
-                    // Redirect to dashboard after successful connection
+                              window.addEventListener('message', function(event) {
+                if (event.data && event.data.type === 'youtube-connected') {
+                  popup.close();
+                  const channelIds = event.data.channelIds;
+                  if (channelIds && channelIds.length > 0) {
+                    // Redirect to collection page with the first channel
+                    window.location.href = '/dashboard/collection?channelId=' + encodeURIComponent(channelIds[0]);
+                  } else {
+                    // Fallback to dashboard if no channel IDs
                     window.location.href = '/dashboard';
                   }
-                });
+                }
+              });
               }
             }}
             className="bg-black text-white rounded-full px-14 py-6 flex items-center gap-5 transition hover:opacity-80"

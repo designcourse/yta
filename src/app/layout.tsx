@@ -33,7 +33,7 @@ export default function RootLayout({
         <SplineBackground />
         <div className="relative z-10 pointer-events-none min-h-screen flex flex-col">
           <Header />
-          <main className="flex-1 flex items-center justify-center">{children}</main>
+          <main className="flex-1">{children}</main>
           <Footer />
         </div>
       </body>
