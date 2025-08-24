@@ -46,6 +46,9 @@ export default async function DashboardPage() {
           <button id="connect-youtube-btn" className="px-2 py-1 rounded hover:bg-black/5 text-left text-black">
             Connect YouTube channel
           </button>
+          <button id="wipe-data-btn" className="px-2 py-1 rounded hover:bg-red-50 text-left text-red-600 font-medium">
+            Wipe All Data
+          </button>
         </nav>
       </aside>
       <main className="p-6 bg-white/80 backdrop-blur-sm pointer-events-auto">
@@ -72,6 +75,31 @@ export default async function DashboardPage() {
                 }
               }
             });
+          };
+
+          document.getElementById('wipe-data-btn').onclick = async function() {
+            if (confirm('Are you sure you want to wipe all your data? This will delete all channels and Google accounts and cannot be undone.')) {
+              try {
+                const response = await fetch('/api/wipe-all-data', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                  alert('All data has been wiped successfully.');
+                  window.location.href = '/';
+                } else {
+                  alert('Error: ' + (result.error || 'Failed to wipe data'));
+                }
+              } catch (error) {
+                console.error('Error wiping data:', error);
+                alert('Error: Failed to wipe data');
+              }
+            }
           };
         `
       }} />
