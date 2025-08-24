@@ -3,15 +3,34 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef } from "react";
 
-function useStaggeredChars(text: string) {
+function useStaggeredWords(text: string) {
   return useMemo(() => {
-    return text.split("").map((char, index) => ({ char, index }));
+    // Split text into words and spaces
+    const wordsAndSpaces = text.split(/(\s+)/);
+    let globalCharIndex = 0;
+
+    return wordsAndSpaces.map((item, wordIndex) => {
+      const chars = item.split("").map((char, charIndex) => ({
+        char,
+        globalIndex: globalCharIndex + charIndex,
+        localIndex: charIndex
+      }));
+
+      globalCharIndex += item.length;
+
+      return {
+        content: item,
+        chars,
+        isSpace: /^\s+$/.test(item),
+        wordIndex
+      };
+    });
   }, [text]);
 }
 
 export default function Hero() {
-  const line1 = useStaggeredChars("Hi, I’m Neria.");
-  const line2 = useStaggeredChars("Think of me as your AI-Powered YouTube coach.");
+  const line1 = useStaggeredWords("Hi, I’m Neria.");
+  const line2 = useStaggeredWords("Think of me as your AI-Powered YouTube coach.");
 
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -45,25 +64,39 @@ export default function Hero() {
         <div className="flex-1 min-w-0 text-black pr-[clamp(16px,3vw,48px)] overflow-visible hero-fade-in">
           <h1 className="mb-8 text-[clamp(36px,4vw,112px)] font-normal leading-[1.1] break-normal">
             <span className="block">
-              {line1.map(({ char, index }) => (
+              {line1.map((wordOrSpace) => (
                 <span
-                  key={`l1-${index}-${char}-${index}`}
-                  data-char
-                  className="inline-block will-change-transform animate-heroChar"
+                  key={`l1-word-${wordOrSpace.wordIndex}`}
+                  className={wordOrSpace.isSpace ? "inline" : "inline-block"}
                 >
-                  {char === " " ? "\u00A0" : char}
+                  {wordOrSpace.chars.map(({ char, globalIndex, localIndex }) => (
+                    <span
+                      key={`l1-${globalIndex}-${char}-${localIndex}`}
+                      data-char
+                      className="inline-block will-change-transform animate-heroChar"
+                    >
+                      {char === " " ? "\u00A0" : char}
+                    </span>
+                  ))}
                 </span>
               ))}
             </span>
             <span className="block h-[80px]" aria-hidden="true" />
             <span className="block">
-              {line2.map(({ char, index }) => (
+              {line2.map((wordOrSpace) => (
                 <span
-                  key={`l2-${index}-${char}-${index}`}
-                  data-char
-                  className="inline-block will-change-transform animate-heroChar"
+                  key={`l2-word-${wordOrSpace.wordIndex}`}
+                  className={wordOrSpace.isSpace ? "inline" : "inline-block"}
                 >
-                  {char === " " ? "\u00A0" : char}
+                  {wordOrSpace.chars.map(({ char, globalIndex, localIndex }) => (
+                    <span
+                      key={`l2-${globalIndex}-${char}-${localIndex}`}
+                      data-char
+                      className="inline-block will-change-transform animate-heroChar"
+                    >
+                      {char === " " ? "\u00A0" : char}
+                    </span>
+                  ))}
                 </span>
               ))}
             </span>
@@ -76,7 +109,7 @@ export default function Hero() {
         <div className="pointer-events-auto flex flex-col items-start justify-end gap-4 fade-in" style={{ animationDelay: "3.6s", alignItems: "flex-end" }}>
           <Link
             href="/youtube-connect"
-            className="bg-white text-black rounded-full px-14 py-6 flex items-center gap-5 transition"
+            className="bg-black text-white rounded-full px-14 py-6 flex items-center gap-5 transition"
             aria-label="Connect your channel"
           >
             <span className="inline-grid place-items-center w-[31px] h-[22px] overflow-hidden" aria-hidden="true">

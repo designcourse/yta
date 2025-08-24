@@ -18,10 +18,7 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Force light mode styling */
-* {
-  color: black !important;
-}
+
 
 /* Override specific elements that need transparency or white backgrounds */
 .bg-white\/80 {
