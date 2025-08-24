@@ -2,6 +2,17 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 
+async function checkUserHasChannels(userId: string): Promise<boolean> {
+  const admin = createSupabaseAdminClient();
+  const { data: channels } = await admin
+    .from("channels")
+    .select("id")
+    .eq("user_id", userId)
+    .limit(1);
+
+  return channels && channels.length > 0;
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
@@ -57,8 +68,14 @@ export async function GET(request: Request) {
               .upsert(basePayload, { onConflict: "google_sub,user_id" });
             upsertError = retry.error;
           }
-          
+
           console.log("Stored basic Google account for:", user.email);
+
+          // Check if user has channels and redirect accordingly
+          const hasChannels = await checkUserHasChannels(user.id);
+          if (!hasChannels) {
+            next = "/onboard";
+          }
         }
       } catch (e) {
         console.error("Callback error:", e);

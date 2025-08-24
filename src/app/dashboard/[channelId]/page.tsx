@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import Link from "next/link";
 import YouTubeStats from "@/components/YouTubeStats";
+import { redirect } from "next/navigation";
 
 export default async function ChannelDashboardPage({
   params,
@@ -30,6 +31,11 @@ export default async function ChannelDashboardPage({
     .from("channels")
     .select("id, channel_id, title")
     .order("created_at", { ascending: true });
+
+  // Redirect to onboard if user has no channels
+  if (!channels || channels.length === 0) {
+    redirect("/onboard");
+  }
 
   return (
     <div className="min-h-screen grid grid-cols-[240px_1fr] pointer-events-none">

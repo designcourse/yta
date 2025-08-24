@@ -11,7 +11,7 @@ export default function YouTubeCallbackPage() {
     async function handleCallback() {
       const code = searchParams.get("code");
       const originalUserId = searchParams.get("state"); // Get the original user ID
-      
+
       if (!code) {
         setStatus("No authorization code received");
         return;
@@ -24,24 +24,34 @@ export default function YouTubeCallbackPage() {
 
       try {
         setStatus("Getting YouTube channels...");
-        
+
         const response = await fetch("/api/youtube-connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            code, 
+          body: JSON.stringify({
+            code,
             originalUserId,
             redirectUri: `${window.location.origin}/youtube-callback`
           }),
         });
 
         if (response.ok) {
-          setStatus("Success! Closing window...");
-          // Notify parent window
-          if (window.opener) {
+          setStatus("Success! Processing...");
+
+          // Check if we're in a popup window
+          const isPopup = window.opener && window.opener !== window;
+
+          if (isPopup && window.opener) {
+            // We're in a popup - notify parent and close
             window.opener.postMessage("youtube-connected", "*");
+            setTimeout(() => window.close(), 1000);
+          } else {
+            // We're in the main window - redirect to dashboard
+            setStatus("Success! Redirecting to dashboard...");
+            setTimeout(() => {
+              window.location.href = '/dashboard';
+            }, 2000);
           }
-          window.close();
         } else {
           const error = await response.text();
           setStatus(`Error: ${error}`);
