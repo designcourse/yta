@@ -7,6 +7,12 @@ interface CollectionHeroProps {
 }
 
 export default function CollectionHero({ neriaResponse }: CollectionHeroProps) {
+  console.log("🔍 CollectionHero rendered with neriaResponse:", {
+    hasResponse: !!neriaResponse,
+    responseLength: neriaResponse?.length || 0,
+    responsePreview: neriaResponse?.substring(0, 100) || "none"
+  });
+
   return (
     <>
       <div
@@ -15,9 +21,13 @@ export default function CollectionHero({ neriaResponse }: CollectionHeroProps) {
         data-node-id="9:91"
       >
         {/* Neria Response Animation */}
-        {neriaResponse && (
+        {neriaResponse ? (
           <div className="w-full mb-8">
             <NeriaResponse response={neriaResponse} isVisible={true} />
+          </div>
+        ) : (
+          <div className="w-full mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded">
+            <p className="text-yellow-800">🔍 Debug: Waiting for Neria response...</p>
           </div>
         )}
       </div>

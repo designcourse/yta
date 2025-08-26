@@ -20,13 +20,29 @@ export async function interpretYouTubeData(data: any, prompt?: string) {
   const defaultPrompt = `Analyze this YouTube data and provide insights about the channel's performance, content strategy, and audience engagement. Focus on key metrics, trends, and actionable recommendations.`;
 
   try {
+    // Validate inputs
+    if (!prompt && !defaultPrompt) {
+      throw new Error('No prompt provided for OpenAI analysis');
+    }
+
+    const finalPrompt = prompt || defaultPrompt;
+    console.log('🔍 OpenAI - Final prompt length:', finalPrompt.length);
+    console.log('🔍 OpenAI - Data size:', JSON.stringify(data).length);
+
+    // Validate prompt is not too long (OpenAI has token limits)
+    if (finalPrompt.length > 32000) {
+      console.warn('⚠️ OpenAI - Prompt is very long, truncating...');
+    }
+
     const openai = getOpenAIClient();
-    const completion = await openai.chat.completions.create({
+
+    // Create the API call with timeout
+    const apiCall = openai.chat.completions.create({
       model: 'gpt-4o', // Using the best available model
       messages: [
         {
           role: 'system',
-          content: prompt || defaultPrompt
+          content: finalPrompt
         },
         {
           role: 'user',
@@ -39,10 +55,41 @@ export async function interpretYouTubeData(data: any, prompt?: string) {
       frequency_penalty: 0.1, // Reduce repetition
     });
 
-    return completion.choices[0]?.message?.content || 'No analysis generated';
+    // Add timeout wrapper
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('OpenAI API call timed out after 45 seconds')), 45000);
+    });
+
+    console.log('🔍 OpenAI - Starting API call...');
+    const completion = await Promise.race([apiCall, timeoutPromise]) as any;
+
+    console.log('🔍 OpenAI - API call completed successfully');
+    const response = completion.choices[0]?.message?.content || 'No analysis generated';
+
+    if (!response || response.length === 0) {
+      console.warn('⚠️ OpenAI - Empty response received from API');
+      return 'I apologize, but I was unable to generate a response at this time.';
+    }
+
+    console.log('🔍 OpenAI - Response length:', response.length);
+    return response;
+
   } catch (error) {
-    console.error('Error calling OpenAI API:', error);
-    throw new Error('Failed to analyze YouTube data');
+    console.error('❌ OpenAI - Error calling OpenAI API:', error);
+
+    // Log detailed error information
+    if (error instanceof Error) {
+      console.error('❌ OpenAI - Error message:', error.message);
+      console.error('❌ OpenAI - Error name:', error.name);
+      if (error.stack) {
+        console.error('❌ OpenAI - Error stack:', error.stack);
+      }
+    } else {
+      console.error('❌ OpenAI - Unknown error type:', typeof error, error);
+    }
+
+    // Re-throw with more context
+    throw new Error(`Failed to analyze YouTube data: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

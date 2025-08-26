@@ -32,7 +32,12 @@ export default function CollectionPage() {
     setIsLoading(true);
     setError(null);
 
+    console.log("🔍 Starting data collection for channel:", channelId);
+
     try {
+      console.log("🔍 Calling /api/collect-youtube-data...");
+      const startTime = Date.now();
+
       const response = await fetch('/api/collect-youtube-data', {
         method: 'POST',
         headers: {
@@ -41,14 +46,33 @@ export default function CollectionPage() {
         body: JSON.stringify({ channelId }),
       });
 
+      const endTime = Date.now();
+      console.log("🔍 API call completed in", endTime - startTime, "ms");
+
       if (!response.ok) {
-        throw new Error('Failed to collect data');
+        console.error("❌ API call failed with status:", response.status);
+        const errorText = await response.text();
+        console.error("❌ API error response:", errorText);
+        throw new Error(`Failed to collect data: ${response.status}`);
       }
 
       const data = await response.json();
+      console.log("✅ API response received:", {
+        hasNeriaResponse: !!data.neriaResponse,
+        neriaResponseLength: data.neriaResponse?.length || 0,
+        subscriberCount: data.subscriberCount,
+        videoCount: data.videoCount,
+        title: data.title
+      });
+
       setChannelData(data);
       setNeriaResponse(data.neriaResponse || null);
+
+      if (!data.neriaResponse) {
+        console.warn("⚠️ No Neria response received - check server logs for details");
+      }
     } catch (err) {
+      console.error("❌ Data collection error:", err);
       setError(err instanceof Error ? err.message : 'Unknown error occurred');
     } finally {
       setIsLoading(false);

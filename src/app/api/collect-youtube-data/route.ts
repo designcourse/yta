@@ -3,6 +3,234 @@ import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getValidAccessToken } from "@/utils/googleAuth";
 import { interpretYouTubeData } from "@/utils/openai";
 
+// Debug endpoint to test specific channels
+// Usage: GET /api/collect-youtube-data?channelId=UCXXX
+// Usage: PATCH /api/collect-youtube-data?channelId=UCXXX (to fix broken associations)
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const channelId = url.searchParams.get('channelId');
+
+  console.log("🔍 DEBUG: Testing channel:", channelId);
+
+  if (!channelId) {
+    return NextResponse.json({ error: "Channel ID required" }, { status: 400 });
+  }
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    console.log("🔍 DEBUG: User authenticated:", user.id);
+
+    // Get channel record
+    const { data: channelRecord, error: channelError } = await supabase
+      .from("channels")
+      .select("id, google_account_id, google_sub, published_at")
+      .eq("channel_id", channelId)
+      .eq("user_id", user.id)
+      .single();
+
+    console.log("🔍 DEBUG: Channel record lookup result:", {
+      found: !!channelRecord,
+      error: channelError,
+      channelRecordId: channelRecord?.id
+    });
+
+    if (channelError || !channelRecord) {
+      return NextResponse.json({
+        debug: {
+          channelId,
+          userId: user.id,
+          channelRecordFound: !!channelRecord,
+          error: channelError
+        },
+        message: "Channel record not found"
+      });
+    }
+
+    // Check Google account
+    let googleAccount = null;
+    if (channelRecord.google_account_id) {
+      const { data: account, error: accountError } = await supabase
+        .from("google_accounts")
+        .select("given_name, google_sub")
+        .eq("id", channelRecord.google_account_id)
+        .single();
+
+      if (!accountError && account) {
+        googleAccount = account;
+      }
+    }
+
+    if (!googleAccount && channelRecord.google_sub) {
+      const { data: account, error: accountError } = await supabase
+        .from("google_accounts")
+        .select("given_name, google_sub")
+        .eq("google_sub", channelRecord.google_sub)
+        .single();
+
+      if (!accountError && account) {
+        googleAccount = account;
+      }
+    }
+
+    console.log("🔍 DEBUG: Google account lookup result:", {
+      googleAccountFound: !!googleAccount,
+      givenName: googleAccount?.given_name,
+      googleSub: googleAccount?.google_sub
+    });
+
+    // Additional debug: Check all google accounts for this user
+    const { data: allGoogleAccounts } = await supabase
+      .from("google_accounts")
+      .select("id, google_sub, given_name, account_name")
+      .eq("user_id", user.id);
+
+    console.log("🔍 DEBUG: All Google accounts for user:", allGoogleAccounts);
+
+    return NextResponse.json({
+      debug: {
+        channelId,
+        userId: user.id,
+        channelRecordId: channelRecord.id,
+        googleAccountFound: !!googleAccount,
+        givenName: googleAccount?.given_name,
+        publishedAt: channelRecord.published_at,
+        allGoogleAccounts: allGoogleAccounts
+      },
+      message: googleAccount ? "Ready for Neria response" : "Missing Google account data"
+    });
+
+  } catch (error) {
+    console.error("🔍 DEBUG: Error:", error);
+    return NextResponse.json({ error: "Debug endpoint failed", details: error }, { status: 500 });
+  }
+}
+
+// Fix endpoint for broken channel associations
+export async function PATCH(request: Request) {
+  const url = new URL(request.url);
+  const channelId = url.searchParams.get('channelId');
+
+  console.log("🔧 FIX: Attempting to fix channel:", channelId);
+
+  if (!channelId) {
+    return NextResponse.json({ error: "Channel ID required" }, { status: 400 });
+  }
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
+    // Get the broken channel record
+    const { data: channelRecord, error: channelError } = await supabase
+      .from("channels")
+      .select("id, google_account_id, google_sub")
+      .eq("channel_id", channelId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (channelError || !channelRecord) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+
+    console.log("🔧 FIX: Current channel record:", channelRecord);
+
+    // Get all Google accounts for this user
+    const { data: googleAccounts } = await supabase
+      .from("google_accounts")
+      .select("id, google_sub, given_name, account_name")
+      .eq("user_id", user.id);
+
+    console.log("🔧 FIX: Available Google accounts:", googleAccounts);
+
+    if (!googleAccounts || googleAccounts.length === 0) {
+      return NextResponse.json({ error: "No Google accounts found for user" }, { status: 404 });
+    }
+
+    // If channel has google_sub but no google_account_id, try to find and fix it
+    if (channelRecord.google_sub && !channelRecord.google_account_id) {
+      const matchingAccount = googleAccounts.find(acc => acc.google_sub === channelRecord.google_sub);
+
+      if (matchingAccount) {
+        console.log("🔧 FIX: Found matching Google account:", matchingAccount);
+
+        // Update the channel record with the correct google_account_id
+        const { error: updateError } = await supabase
+          .from("channels")
+          .update({
+            google_account_id: matchingAccount.id
+          })
+          .eq("id", channelRecord.id);
+
+        if (updateError) {
+          console.error("🔧 FIX: Failed to update channel:", updateError);
+          return NextResponse.json({ error: "Failed to fix channel association" }, { status: 500 });
+        }
+
+        console.log("🔧 FIX: Successfully fixed channel association");
+        return NextResponse.json({
+          success: true,
+          message: "Channel association fixed",
+          fixed: {
+            channelId,
+            googleAccountId: matchingAccount.id,
+            givenName: matchingAccount.given_name
+          }
+        });
+      }
+    }
+
+    // If channel has no google_sub, try to assign it to the first available account
+    if (!channelRecord.google_sub && googleAccounts.length > 0) {
+      const firstAccount = googleAccounts[0];
+      console.log("🔧 FIX: Assigning channel to first available account:", firstAccount);
+
+      const { error: updateError } = await supabase
+        .from("channels")
+        .update({
+          google_sub: firstAccount.google_sub,
+          google_account_id: firstAccount.id
+        })
+        .eq("id", channelRecord.id);
+
+      if (updateError) {
+        console.error("🔧 FIX: Failed to assign channel to account:", updateError);
+        return NextResponse.json({ error: "Failed to assign channel to account" }, { status: 500 });
+      }
+
+      console.log("🔧 FIX: Successfully assigned channel to account");
+      return NextResponse.json({
+        success: true,
+        message: "Channel assigned to Google account",
+        fixed: {
+          channelId,
+          googleAccountId: firstAccount.id,
+          givenName: firstAccount.given_name
+        }
+      });
+    }
+
+    return NextResponse.json({
+      success: false,
+      message: "No fixes available for this channel",
+      currentState: channelRecord
+    });
+
+  } catch (error) {
+    console.error("🔧 FIX: Error:", error);
+    return NextResponse.json({ error: "Fix endpoint failed", details: error }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   console.log("🎯 COLLECT YOUTUBE DATA API CALLED");
   try {
@@ -151,7 +379,30 @@ export async function POST(request: Request) {
         }
       }
 
+      // If no google_account found but channel has google_sub, try to create/fix the association
+      if (!googleAccount && channelRecord.google_sub) {
+        console.log("🔄 Attempting to create missing Google account record for google_sub:", channelRecord.google_sub);
+
+        // Try to find if there's an existing google account with this google_sub for this user
+        const { data: existingGoogleAccount } = await supabase
+          .from("google_accounts")
+          .select("given_name, google_sub")
+          .eq("google_sub", channelRecord.google_sub)
+          .eq("user_id", user.id)
+          .single();
+
+        if (existingGoogleAccount) {
+          googleAccount = existingGoogleAccount;
+          console.log("✅ Found existing Google account by google_sub:", googleAccount.given_name);
+        } else {
+          console.log("⚠️ No Google account record found for google_sub:", channelRecord.google_sub);
+          console.log("⚠️ This might indicate a data integrity issue");
+        }
+      }
+
       if (googleAccount) {
+        console.log("✅ Google account found for Neria response:", googleAccount.given_name);
+
         // Calculate account age in a more readable format
         const publishedAt = new Date(channelRecord.published_at);
         const now = new Date();
@@ -167,6 +418,25 @@ export async function POST(request: Request) {
           accountAgeText = `${diffMonths} month${diffMonths > 1 ? 's' : ''}`;
         } else {
           accountAgeText = `${diffDays} day${diffDays > 1 ? 's' : ''}`;
+        }
+
+        // Validate all required data is present before creating prompt
+        if (!collectedData.title || typeof collectedData.subscriberCount !== 'number' || typeof collectedData.videoCount !== 'number' || typeof collectedData.viewCount !== 'number') {
+          console.error("❌ Missing required channel data for OpenAI prompt:", {
+            title: collectedData.title,
+            subscriberCount: collectedData.subscriberCount,
+            videoCount: collectedData.videoCount,
+            viewCount: collectedData.viewCount
+          });
+          throw new Error('Missing required channel data for OpenAI prompt');
+        }
+
+        if (!googleAccount.given_name || !accountAgeText) {
+          console.error("❌ Missing required Google account data for OpenAI prompt:", {
+            givenName: googleAccount.given_name,
+            accountAgeText
+          });
+          throw new Error('Missing required Google account data for OpenAI prompt');
         }
 
         // Create the Neria prompt
@@ -185,11 +455,34 @@ It can be something similar to, "Hi ${googleAccount.given_name}, I see you've ra
         console.log("🔑 OpenAI API Key present:", !!process.env.OPENAI_API_KEY);
         console.log("🔑 OpenAI API Key length:", process.env.OPENAI_API_KEY?.length || 0);
 
+        // Log channel data that might affect OpenAI call
+        console.log("📊 Channel data for OpenAI:", {
+          title: collectedData.title,
+          subscriberCount: collectedData.subscriberCount,
+          videoCount: collectedData.videoCount,
+          viewCount: collectedData.viewCount,
+          accountAgeText: accountAgeText,
+          givenName: googleAccount.given_name
+        });
+
         try {
           // Call OpenAI with the Neria prompt
           console.log("🤖 Calling OpenAI API...");
-          neriaResponse = await interpretYouTubeData({}, neriaPrompt);
-          console.log("✅ OpenAI response received:", neriaResponse.substring(0, 100) + "...");
+          const openaiStartTime = Date.now();
+
+          // Create a timeout promise for the OpenAI call
+          const openaiPromise = interpretYouTubeData({}, neriaPrompt);
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('OpenAI API call timed out after 30 seconds')), 30000);
+          });
+
+          neriaResponse = await Promise.race([openaiPromise, timeoutPromise]) as string;
+          const openaiEndTime = Date.now();
+          const openaiDuration = openaiEndTime - openaiStartTime;
+
+          console.log("✅ OpenAI response received in", openaiDuration, "ms");
+          console.log("✅ OpenAI response length:", neriaResponse.length);
+          console.log("✅ OpenAI response preview:", neriaResponse.substring(0, 100) + "...");
 
           // Store the context in neria_context table
           console.log("💾 Storing Neria context in database...");
@@ -211,9 +504,38 @@ It can be something similar to, "Hi ${googleAccount.given_name}, I see you've ra
         } catch (openaiError) {
           console.error("❌ OpenAI error:", openaiError);
           console.error("❌ Error details:", openaiError.message);
-          // Continue without Neria response if OpenAI fails
+          console.error("❌ Error stack:", openaiError.stack);
+
+          // Log additional context about the failure
+          console.log("❌ Channel data at time of failure:", {
+            channelId,
+            userId: user.id,
+            channelRecordId: channelRecord.id,
+            googleAccountId: googleAccount.given_name,
+            promptLength: neriaPrompt.length
+          });
+
+          // Provide a fallback response so the animation still works
+          neriaResponse = `Hi ${googleAccount.given_name}, I can see you've been running ${collectedData.title} for ${accountAgeText}, and you've created ${collectedData.videoCount.toLocaleString()} videos! I'm analyzing your channel data right now to provide you with personalized insights. This might take a moment...`;
+          console.log("✅ Using fallback Neria response:", neriaResponse.substring(0, 100) + "...");
         }
+      } else {
+        console.log("❌ No Google account found for channel:", {
+          channelId,
+          userId: user.id,
+          channelRecordId: channelRecord?.id,
+          googleAccountId: channelRecord?.google_account_id,
+          googleSub: channelRecord?.google_sub
+        });
+        console.log("❌ Skipping Neria OpenAI call due to missing Google account");
       }
+    } else {
+      console.log("❌ No channel record found, cannot generate Neria response");
+      console.log("❌ Channel lookup details:", {
+        channelId,
+        userId: user.id,
+        channelRecordExists: !!channelRecord
+      });
     }
 
     return NextResponse.json({

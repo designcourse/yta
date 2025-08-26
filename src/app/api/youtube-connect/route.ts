@@ -63,21 +63,30 @@ export async function POST(request: Request) {
     let accountName: string | undefined;
     let givenName: string | undefined;
     try {
+      console.log("🔍 Attempting to get Google user info for channel association...");
       // Get user info from Google to identify the account
       const userInfoResponse = await fetch(
         "https://www.googleapis.com/oauth2/v2/userinfo",
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
-      
+
+      console.log("🔍 Google user info response status:", userInfoResponse.status);
+
       if (userInfoResponse.ok) {
         const userInfo = await userInfoResponse.json();
         googleSubId = userInfo.id;
         accountName = userInfo.name;
         givenName = userInfo.given_name;
-        console.log("Google account ID for channels:", googleSubId);
+        console.log("✅ Google account ID for channels:", googleSubId);
+        console.log("✅ Google account name:", accountName);
+        console.log("✅ Google given name:", givenName);
+      } else {
+        const errorText = await userInfoResponse.text();
+        console.error("❌ Google user info API failed:", userInfoResponse.status, errorText);
       }
     } catch (error) {
-      console.error("Failed to get Google user info:", error);
+      console.error("❌ Failed to get Google user info:", error);
+      console.error("❌ Error details:", error.message);
     }
 
     // Create or update a Google account record for this specific Google account
@@ -105,16 +114,41 @@ export async function POST(request: Request) {
       }
       console.log("Updated tokens for Google account:", googleSubId);
     } else {
-      // Fallback: update the user's primary Google account
-      await admin.from("google_accounts").update({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      }).eq("user_id", originalUserId);
-      console.log("Updated tokens for primary Google account");
+      console.log("⚠️ No googleSubId available, attempting to find existing Google account...");
+
+      // Try to find existing Google account for this user by matching access token or refresh token
+      const { data: existingAccount } = await admin
+        .from("google_accounts")
+        .select("id, google_sub, given_name")
+        .eq("user_id", originalUserId)
+        .limit(1)
+        .single();
+
+      if (existingAccount) {
+        googleSubId = existingAccount.google_sub;
+        givenName = existingAccount.given_name;
+        console.log("✅ Found existing Google account:", googleSubId, "with name:", givenName);
+
+        // Update tokens for this existing account
+        await admin.from("google_accounts").update({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        }).eq("id", existingAccount.id);
+        console.log("Updated tokens for existing Google account");
+      } else {
+        // Fallback: update the user's primary Google account
+        await admin.from("google_accounts").update({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        }).eq("user_id", originalUserId);
+        console.log("Updated tokens for primary Google account (no google_sub)");
+      }
     }
 
     // Add channels for ORIGINAL user, storing which Google account they belong to
     for (const channel of channels) {
+      console.log(`🔍 Adding channel: ${channel.snippet?.title} (${channel.id}) with google_sub: ${googleSubId}`);
+
       // First try with google_sub field
       let result = await admin.from("channels").upsert(
         {
@@ -129,7 +163,7 @@ export async function POST(request: Request) {
 
       // If that fails (maybe google_sub column doesn't exist), try without it
       if (result.error && result.error.message?.includes('google_sub')) {
-        console.log("google_sub column doesn't exist, trying without it for channel:", channel.snippet?.title);
+        console.log("⚠️ google_sub column doesn't exist, trying without it for channel:", channel.snippet?.title);
         result = await admin.from("channels").upsert(
           {
             user_id: originalUserId,
@@ -141,7 +175,11 @@ export async function POST(request: Request) {
         );
       }
 
-      console.log("Added channel for ORIGINAL user:", channel.snippet?.title, result.error ? result.error.message : "success");
+      if (result.error) {
+        console.error(`❌ Failed to add channel ${channel.snippet?.title}:`, result.error.message);
+      } else {
+        console.log(`✅ Successfully added channel: ${channel.snippet?.title} with google_sub: ${googleSubId}`);
+      }
     }
 
     // Return the channel IDs that were added

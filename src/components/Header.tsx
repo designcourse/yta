@@ -8,17 +8,17 @@ import { createSupabaseBrowserClient } from "@/utils/supabase/client";
 export default function Header() {
   const supabase = createSupabaseBrowserClient();
   const [isSignedIn, setIsSignedIn] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
     let componentMounted = true;
 
+    // Get initial session
     supabase.auth.getSession().then(({ data }) => {
       if (!componentMounted) return;
       setIsSignedIn(!!data.session);
     });
 
+    // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsSignedIn(!!session);
     });
@@ -42,10 +42,7 @@ export default function Header() {
           />
         </Link>
 
-        {!mounted ? (
-          // Loading state during hydration
-          <div className="w-20 h-8 bg-gray-200 animate-pulse rounded"></div>
-        ) : !isSignedIn ? (
+        {!isSignedIn ? (
           <button
             className="inline-flex items-center gap-2 text-[19px] font-bold text-black"
             onClick={async () => {
