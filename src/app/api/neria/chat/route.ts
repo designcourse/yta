@@ -8,6 +8,57 @@ function getOpenAI() {
   return new OpenAI({ apiKey });
 }
 
+async function getCurrentModel(supabase: any) {
+  const { data: settings } = await supabase
+    .from("model_settings")
+    .select("current_model_id")
+    .single();
+  
+  if (!settings?.current_model_id) {
+    // Fallback to default gpt-4o-mini
+    return {
+      model: "gpt-4o-mini",
+      max_input_tokens: 128000,
+      max_output_tokens: 8000
+    };
+  }
+
+  const { data: modelProvider } = await supabase
+    .from("model_providers")
+    .select("model, max_input_tokens, max_output_tokens")
+    .eq("id", settings.current_model_id)
+    .single();
+
+  return modelProvider || {
+    model: "gpt-4o-mini", 
+    max_input_tokens: 128000,
+    max_output_tokens: 8000
+  };
+}
+
+function countTokens(messages: Array<{ role: string; content: string }>, model: string): number {
+  // More accurate fallback estimation for OpenAI models
+  // Based on empirical data: ~3.5-4 characters per token for English text
+  let totalTokens = 0;
+  
+  for (const message of messages) {
+    // Base tokens per message (OpenAI format overhead)
+    totalTokens += 4; // <|start|>{role}<|message|> overhead
+    
+    // Count tokens for role and content
+    const roleTokens = Math.ceil(message.role.length / 3.5);
+    const contentTokens = Math.ceil(message.content.length / 3.5);
+    
+    totalTokens += roleTokens + contentTokens;
+  }
+  
+  // Additional tokens for assistant response priming
+  totalTokens += 3;
+  
+  // Add a small buffer for potential variations
+  return Math.ceil(totalTokens * 1.1);
+}
+
 type ChatPostBody = {
   threadId?: string;
   channelId?: string; // YouTube channel id (external) or internal UUID; we resolve below
@@ -72,6 +123,7 @@ async function getOrCreateThread(supabase: any, userId: string, channelId?: stri
     .insert({ user_id: userId, channel_id: internalChannelId, title: "Neria Chat" })
     .select("id")
     .single();
+
   return created?.id as string;
 }
 
@@ -221,12 +273,17 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
+
+
     const threadId = body.threadId || (await getOrCreateThread(supabase, user.id, body.channelId));
 
     // Store user message
     await supabase
       .from("chat_messages")
       .insert({ thread_id: threadId, user_id: user.id, role: "user", content: body.message });
+
+    // Get current model configuration
+    const modelConfig = await getCurrentModel(supabase);
 
     // Load context
     const pinned = await loadPinnedContext(supabase, user.id, threadId);
@@ -239,13 +296,20 @@ export async function POST(request: Request) {
     for (const m of history) messages.push({ role: m.role as any, content: m.content });
     messages.push({ role: "user", content: body.message });
 
+    // Calculate context usage
+    const inputTokens = countTokens(messages, modelConfig.model);
+    const maxTokens = modelConfig.max_input_tokens - modelConfig.max_output_tokens; // Reserve space for output
+    const contextPercentage = Math.min(100, Math.ceil((inputTokens / maxTokens) * 100));
+    
+
+
     // Call model with streaming
     const openai = getOpenAI();
     const stream = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: modelConfig.model,
       messages,
       temperature: 0.4,
-      max_tokens: 800,
+      max_tokens: Math.min(800, modelConfig.max_output_tokens),
       stream: true,
     });
 
@@ -256,8 +320,17 @@ export async function POST(request: Request) {
     const readableStream = new ReadableStream({
       async start(controller) {
         try {
-          // Send initial data with threadId
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'init', threadId })}\n\n`));
+          // Send initial data with threadId and context percentage
+          const initData = { 
+            type: 'init', 
+            threadId, 
+            contextPercentage,
+            model: modelConfig.model,
+            inputTokens,
+            maxTokens
+          };
+
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(initData)}\n\n`));
 
           for await (const chunk of stream) {
             const content = chunk.choices[0]?.delta?.content;

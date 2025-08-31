@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNeria } from './NeriaContext';
+import ContextIndicator from './ContextIndicator';
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
@@ -23,6 +24,7 @@ const NeriaContainer: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
+  const [contextPercentage, setContextPercentage] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadThreadAndMessages = useCallback(async () => {
@@ -38,6 +40,9 @@ const NeriaContainer: React.FC = () => {
           if (mRes.ok) {
             const m = await mRes.json();
             setMessages(m.messages || []);
+            if (m.contextPercentage !== undefined) {
+              setContextPercentage(m.contextPercentage);
+            }
             setInitialLoading(false);
             return;
           }
@@ -53,6 +58,9 @@ const NeriaContainer: React.FC = () => {
           if (mRes.ok) {
             const m = await mRes.json();
             setMessages(m.messages || []);
+            if (m.contextPercentage !== undefined) {
+              setContextPercentage(m.contextPercentage);
+            }
           } else {
             setMessages([]);
           }
@@ -142,8 +150,13 @@ const NeriaContainer: React.FC = () => {
               try {
                 const data = JSON.parse(line.slice(6));
                 
-                if (data.type === 'init' && data.threadId && !threadId) {
-                  setThreadId(data.threadId);
+                if (data.type === 'init') {
+                  if (data.threadId && !threadId) {
+                    setThreadId(data.threadId);
+                  }
+                  if (data.contextPercentage !== undefined) {
+                    setContextPercentage(data.contextPercentage);
+                  }
                 } else if (data.type === 'chunk' && data.content) {
                   // Update the assistant message with the new content
                   setMessages((prev) => prev.map(m => 
@@ -373,6 +386,18 @@ const NeriaContainer: React.FC = () => {
                   <span className="text-white font-medium text-lg">N</span>
                 </div>
               </div>
+              
+              {/* Context Indicator */}
+              {contextPercentage >= 1 && (
+                <div className="flex items-center space-x-2">
+                  <ContextIndicator 
+                    percentage={contextPercentage}
+                    size={36}
+                    strokeWidth={3}
+                    className="opacity-90"
+                  />
+                </div>
+              )}
               
               {/* Detach Window Button */}
               <button 

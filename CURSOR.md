@@ -58,6 +58,9 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **AI Strategy Generation**: OpenAI-powered channel analysis and growth strategies
 - **Context-Aware Responses**: Maintains conversation context across multiple interactions
 - **NeriaContainer Component**: Floating AI assistant window with minimize/detach functionality and streaming chat
+- **Context Percentage Indicator**: Real-time visual display of conversation context usage with Cursor-style radial progress
+- **GPT-4o Integration**: Premium AI model for highest quality responses and strategic insights
+- **Token Counting**: Accurate context calculation using empirical estimation for optimal performance
 
 #### 5. **Comprehensive Dashboard System**
 - **DashboardLayout Component**: Unified layout with sidebar navigation and channel selector
@@ -73,10 +76,18 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Enhanced Data Collection**: Channel statistics, subscriber counts, video metrics, account age calculation
 - **Debug & Fix Endpoints**: Comprehensive debugging tools for channel associations and data integrity
 - **Last Channel Tracking**: Remembers user's last viewed channel for improved UX
-- **Data Wipe Functionality**: Administrative tools for complete data cleanup
+- **Comprehensive Data Wipe**: Enhanced cleanup functionality covering all tables (chat_threads, messages, profiles, etc.)
 - **Error Handling**: Robust error handling with detailed logging and user feedback
 
-#### 7. **Technical Improvements**
+#### 7. **Context Awareness & Model Optimization**
+- **Real-time Context Tracking**: Visual indicator showing conversation context usage percentage
+- **ContextIndicator Component**: Cursor-style radial progress bar with precise token calculations
+- **Context Persistence**: Context percentage maintained across page refreshes and navigation
+- **GPT-4o Upgrade**: Enhanced model configuration from gpt-4o-mini to gpt-4o for premium quality
+- **Dynamic Model Management**: Database-driven model selection with fallback configuration
+- **Token Estimation**: Reliable token counting without WebAssembly dependencies
+
+#### 8. **Technical Improvements**
 - **Hydration Safety**: Resolved React hydration mismatch errors
 - **Sidebar Navigation**: Fixed 213px sidebar with responsive main content area
 - **Responsive Typography**: Fluid text sizing that scales with viewport width
@@ -304,3 +315,25 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - **Send flow**: messages are optimistically added in the UI, then `POST /api/neria/chat` is called with `{ channelId, threadId, message }`. The response streams in real-time using Server-Sent Events, with text appearing character-by-character as generated. The `threadId` is persisted if newly created.
 - **Per-channel memory**: last thread id is persisted per channel in `localStorage`, enabling seamless continuity as users navigate dashboard pages for the same channel.
 - **UI behavior**: the chat window can be minimized or detached into a floating, draggable/resizable panel; state is managed via `NeriaContext` and component state.
+
+## 📋 Recent Session Updates (January 2025)
+
+### **Context Percentage Indicator Implementation**
+- **ContextIndicator Component**: Created Cursor-style radial progress bar showing real-time context usage
+- **Token Counting System**: Implemented reliable token estimation (3.5-4 chars/token) without WebAssembly dependencies
+- **Context Persistence**: Enhanced messages API to calculate and return context percentage for page refresh persistence
+- **Visual Integration**: 36px circular indicator with 3px stroke, 28% font scaling, positioned next to Neria avatar
+- **Real-time Updates**: Context percentage calculated and sent with each streaming response
+
+### **GPT-4o Model Upgrade**
+- **Database Configuration**: Added GPT-4o to model_providers table (128k input, 4k output tokens)
+- **Model Settings Update**: Switched current and fallback models from gpt-4o-mini to gpt-4o
+- **Premium Quality**: Users now receive highest-tier AI responses for strategic YouTube coaching
+- **Context Optimization**: Adjusted token calculations for GPT-4o's 4k output limit vs 8k on mini
+- **Verification**: Debug logging confirmed successful model upgrade and proper token calculations
+
+### **Enhanced Data Management**
+- **Comprehensive Wipe**: Updated wipe-all-data API to include all newer tables (chat_threads, messages, profiles, etc.)
+- **Thread Association**: Fixed channel ID resolution for proper context loading in chat threads
+- **Context Loading**: Streamlined context retrieval across page loads and message history
+- **Error Handling**: Improved debugging and error resolution for model configuration and context calculation

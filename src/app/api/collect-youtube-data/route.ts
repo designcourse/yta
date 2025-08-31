@@ -548,8 +548,8 @@ export async function POST(request: Request) {
           }
         } catch (openaiError) {
           console.error("❌ OpenAI error:", openaiError);
-          console.error("❌ Error details:", openaiError.message);
-          console.error("❌ Error stack:", openaiError.stack);
+          console.error("❌ Error details:", openaiError instanceof Error ? openaiError.message : 'Unknown error');
+          console.error("❌ Error stack:", openaiError instanceof Error ? openaiError.stack : 'No stack trace');
 
           // Log additional context about the failure
           console.log("❌ Channel data at time of failure:", {

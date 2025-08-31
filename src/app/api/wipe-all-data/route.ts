@@ -19,27 +19,102 @@ export async function POST(request: Request) {
       .select("id")
       .eq("user_id", user.id);
 
-    // Delete all neria_context records for the user's channels
+    // Delete all channel-related and user-related data
     if (userChannels && userChannels.length > 0) {
       const channelIds = userChannels.map(channel => channel.id);
-      console.log(`🗑️ Deleting neria_context records for ${channelIds.length} channels`);
+      console.log(`🗑️ Deleting all data for ${channelIds.length} channels`);
+      
+      // Delete neria_context records
       const { error: neriaContextError } = await admin
         .from("neria_context")
         .delete()
         .in("channel_id", channelIds);
+      if (neriaContextError) console.warn("⚠️ Error deleting neria_context:", neriaContextError);
 
-      if (neriaContextError) {
-        console.error("❌ Error deleting neria context:", neriaContextError);
-        return NextResponse.json({
-          error: "Failed to delete neria context",
-          details: neriaContextError.message
-        }, { status: 500 });
-      } else {
-        console.log("✅ Successfully deleted neria_context records");
-      }
-    } else {
-      console.log("ℹ️ No channels found for user, skipping neria_context deletion");
+      // Delete latest_video_snapshots
+      const { error: videoSnapshotsError } = await admin
+        .from("latest_video_snapshots")
+        .delete()
+        .in("channel_id", channelIds);
+      if (videoSnapshotsError) console.warn("⚠️ Error deleting latest_video_snapshots:", videoSnapshotsError);
+
+      // Delete stats_snapshots
+      const { error: statsSnapshotsError } = await admin
+        .from("stats_snapshots")
+        .delete()
+        .in("channel_id", channelIds);
+      if (statsSnapshotsError) console.warn("⚠️ Error deleting stats_snapshots:", statsSnapshotsError);
+
+      // Delete memory_profile
+      const { error: memoryProfileError } = await admin
+        .from("memory_profile")
+        .delete()
+        .in("channel_id", channelIds);
+      if (memoryProfileError) console.warn("⚠️ Error deleting memory_profile:", memoryProfileError);
+
+      // Delete channel_strategy
+      const { error: channelStrategyError } = await admin
+        .from("channel_strategy")
+        .delete()
+        .in("channel_id", channelIds);
+      if (channelStrategyError) console.warn("⚠️ Error deleting channel_strategy:", channelStrategyError);
+
+      // Delete channel_questions
+      const { error: channelQuestionsError } = await admin
+        .from("channel_questions")
+        .delete()
+        .in("channel_id", channelIds);
+      if (channelQuestionsError) console.warn("⚠️ Error deleting channel_questions:", channelQuestionsError);
+
+      // Delete collection_chunks
+      const { error: collectionChunksError } = await admin
+        .from("collection_chunks")
+        .delete()
+        .in("channel_id", channelIds);
+      if (collectionChunksError) console.warn("⚠️ Error deleting collection_chunks:", collectionChunksError);
+
+      // Delete memory_longterm
+      const { error: memoryLongtermError } = await admin
+        .from("memory_longterm")
+        .delete()
+        .in("channel_id", channelIds);
+      if (memoryLongtermError) console.warn("⚠️ Error deleting memory_longterm:", memoryLongtermError);
+
+      console.log("✅ Successfully deleted channel-related data");
     }
+
+    // Delete all user-specific data (not channel-specific)
+    
+    // Delete chat_threads and their messages
+    const { data: userThreads } = await admin
+      .from("chat_threads")
+      .select("id")
+      .eq("user_id", user.id);
+
+    if (userThreads && userThreads.length > 0) {
+      const threadIds = userThreads.map(thread => thread.id);
+      
+      // Delete chat_messages first (foreign key constraint)
+      const { error: messagesError } = await admin
+        .from("chat_messages")
+        .delete()
+        .in("thread_id", threadIds);
+      if (messagesError) console.warn("⚠️ Error deleting chat_messages:", messagesError);
+
+      // Delete thread_summaries
+      const { error: summariesError } = await admin
+        .from("thread_summaries")
+        .delete()
+        .in("thread_id", threadIds);
+      if (summariesError) console.warn("⚠️ Error deleting thread_summaries:", summariesError);
+    }
+
+    // Delete chat_threads
+    const { error: threadsError } = await admin
+      .from("chat_threads")
+      .delete()
+      .eq("user_id", user.id);
+    if (threadsError) console.warn("⚠️ Error deleting chat_threads:", threadsError);
 
     // Delete all channels for the user
     const { error: channelsError } = await admin

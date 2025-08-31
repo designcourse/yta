@@ -86,7 +86,7 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       console.error("❌ Failed to get Google user info:", error);
-      console.error("❌ Error details:", error.message);
+      console.error("❌ Error details:", error instanceof Error ? error.message : 'Unknown error');
     }
 
     // Create or update a Google account record for this specific Google account
