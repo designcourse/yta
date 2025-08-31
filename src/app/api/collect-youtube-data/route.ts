@@ -258,7 +258,7 @@ export async function POST(request: Request) {
 
     // Get channel details from YouTube API with statistics
     const channelResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&id=${channelId}`,
+      `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails,brandingSettings&id=${channelId}`,
       {
         headers: {
           Authorization: `Bearer ${tokenResult.accessToken}`,
@@ -285,7 +285,7 @@ export async function POST(request: Request) {
     const accountAge = `${Math.floor(accountAgeInDays / 365)} years, ${accountAgeInDays % 365} days`;
 
     // Extract the data we need
-    const collectedData = {
+    const collectedData: any = {
       subscriberCount: parseInt(channel.statistics.subscriberCount),
       videoCount: parseInt(channel.statistics.videoCount),
       viewCount: parseInt(channel.statistics.viewCount),
@@ -295,6 +295,32 @@ export async function POST(request: Request) {
       description: channel.snippet.description,
       thumbnailUrl: channel.snippet.thumbnails?.default?.url,
     };
+
+    // Try to fetch recent video titles (up to 10)
+    let recentTitles: string[] = [];
+    try {
+      const uploadsPlaylistId = channel?.contentDetails?.relatedPlaylists?.uploads;
+      if (uploadsPlaylistId) {
+        const playlistItemsRes = await fetch(
+          `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=10`,
+          {
+            headers: {
+              Authorization: `Bearer ${tokenResult.accessToken}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+        if (playlistItemsRes.ok) {
+          const playlistItems = await playlistItemsRes.json();
+          recentTitles = (playlistItems.items || [])
+            .map((it: any) => it?.snippet?.title)
+            .filter((t: any) => typeof t === 'string' && t.trim().length > 0);
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to fetch recent video titles', e);
+    }
+    collectedData.recentVideoTitles = recentTitles;
 
     // Update the channel record in the database with the collected data
     const { error: updateError } = await supabase
@@ -439,16 +465,35 @@ export async function POST(request: Request) {
           throw new Error('Missing required Google account data for OpenAI prompt');
         }
 
-        // Create the Neria prompt
-        const neriaPrompt = `You are now a YouTube coach. The channel name in question is ${collectedData.title}, they have a total of ${collectedData.subscriberCount.toLocaleString()} subscribers, ${collectedData.viewCount.toLocaleString()} views, ${collectedData.videoCount.toLocaleString()} videos, and the youtube account is ${accountAgeText} old. The channel's creator name is ${googleAccount.given_name}.
+        // Store channel context for later question inference
+        try {
+          const { error: ctxAboutErr } = await supabase
+            .from("neria_context")
+            .insert({
+              channel_id: channelRecord.id,
+              google_account: googleAccount.google_sub,
+              published_at: channelRecord.published_at,
+              prompt_text: collectedData.description || '',
+              prompt_type: "channel_about"
+            });
+          if (ctxAboutErr) console.warn('⚠️ Failed to store channel_about context', ctxAboutErr);
 
-Your name is Neria. Neria is always very positive regardless of the status of their youtube account and future video analytics that you will have access to. The goal is to inspire confidence through positivity.
+          if (recentTitles.length > 0) {
+            const { error: ctxTitlesErr } = await supabase
+              .from("neria_context")
+              .insert({
+                channel_id: channelRecord.id,
+                google_account: googleAccount.google_sub,
+                published_at: channelRecord.published_at,
+                prompt_text: JSON.stringify(recentTitles),
+                prompt_type: "recent_video_titles"
+              });
+            if (ctxTitlesErr) console.warn('⚠️ Failed to store recent_video_titles context', ctxTitlesErr);
+          }
+        } catch {}
 
-This will be the first time they hear from you. ${googleAccount.given_name} will be asking you for help regarding their YouTube channel.
-
-While more information is being collected, provide a response to them in a friendly, affirming tone.
-
-It can be something similar to, "Hi ${googleAccount.given_name}, I see you've ran ${collectedData.title} for ${accountAgeText}, and you've produced ${collectedData.videoCount.toLocaleString()} videos! Hang tight while I collect more data.."`;
+        // Create the concise Neria prompt (exactly 2 sentences, starts with Hey [name])
+        const neriaPrompt = `You are Neria, a positive YouTube coach. Write exactly two sentences, no more, no less. Start the first sentence with: Hey ${googleAccount.given_name}, and speak in a warm, affirming tone. Mention briefly the channel ${collectedData.title} with ${collectedData.subscriberCount.toLocaleString()} subscribers and ${collectedData.videoCount.toLocaleString()} videos, and that you're collecting data now.`;
 
         console.log("🔄 Starting Neria OpenAI call...");
         console.log("📝 Neria prompt:", neriaPrompt.substring(0, 100) + "...");

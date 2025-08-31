@@ -4,9 +4,12 @@ import NeriaResponse from './NeriaResponse';
 
 interface CollectionHeroProps {
   neriaResponse: string | null;
+  onNeriaComplete?: () => void;
+  onExitComplete?: () => void;
+  isStrategy?: boolean;
 }
 
-export default function CollectionHero({ neriaResponse }: CollectionHeroProps) {
+export default function CollectionHero({ neriaResponse, onNeriaComplete, onExitComplete, isStrategy }: CollectionHeroProps) {
   console.log("🔍 CollectionHero rendered with neriaResponse:", {
     hasResponse: !!neriaResponse,
     responseLength: neriaResponse?.length || 0,
@@ -23,7 +26,13 @@ export default function CollectionHero({ neriaResponse }: CollectionHeroProps) {
         {/* Neria Response Animation */}
         {neriaResponse ? (
           <div className="w-full mb-8">
-            <NeriaResponse response={neriaResponse} isVisible={true} />
+            <NeriaResponse 
+              response={neriaResponse} 
+              isVisible={true} 
+              onComplete={onNeriaComplete} 
+              onExitComplete={onExitComplete}
+              isStrategy={isStrategy} 
+            />
           </div>
         ) : (
           <div className="w-full mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded">
@@ -32,20 +41,7 @@ export default function CollectionHero({ neriaResponse }: CollectionHeroProps) {
         )}
       </div>
 
-      {/* Fixed bottom-left status indicator */}
-      <div className="fixed bottom-20 left-20 z-50 pointer-events-none">
-        <div className="flex flex-col gap-2 text-left">
-          <div
-            className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-mono text-black"
-            style={{ fontVariationSettings: "'wdth' 100" }}
-          >
-            COLLECTING DATA
-          </div>
-          <div className="text-sm sm:text-base md:text-lg lg:text-xl text-gray-700">
-            This may take a couple minutes..
-          </div>
-        </div>
-      </div>
+      {/* Removed collecting status indicator */}
     </>
   );
 }

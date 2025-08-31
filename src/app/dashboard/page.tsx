@@ -1,5 +1,5 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
-import Link from "next/link";
+import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
@@ -9,14 +9,7 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return (
-      <div className="min-h-screen grid place-items-center">
-        <div className="text-center">
-          <p className="mb-4">Please sign in to access your dashboard</p>
-          <Link className="text-sm px-3 py-1.5 border rounded" href="/">Go to home page</Link>
-        </div>
-      </div>
-    );
+    redirect("/auth/signin");
   }
 
   const { data: channels } = await supabase
@@ -29,80 +22,27 @@ export default async function DashboardPage() {
     redirect("/onboard");
   }
 
-  return (
-    <div className="min-h-screen grid grid-cols-[240px_1fr] pointer-events-none">
-      <aside className="border-r border-black/10 p-4 space-y-2 bg-white/80 backdrop-blur-sm pointer-events-auto">
-        <div className="text-sm font-semibold mb-2 text-black">Navigation</div>
-        <nav className="flex flex-col gap-1">
-          {(channels ?? []).map((c) => (
-            <Link 
-              key={c.id} 
-              href={`/dashboard/${encodeURIComponent(c.channel_id)}`} 
-              className="px-2 py-1 rounded hover:bg-black/5 text-black"
-            >
-              {c.title || c.channel_id}
-            </Link>
-          ))}
-          <button id="connect-youtube-btn" className="px-2 py-1 rounded hover:bg-black/5 text-left text-black">
-            Connect YouTube channel
-          </button>
-          <button id="wipe-data-btn" className="px-2 py-1 rounded hover:bg-red-50 text-left text-red-600 font-medium">
-            Wipe All Data
-          </button>
-        </nav>
-      </aside>
-      <main className="p-6 bg-white/80 backdrop-blur-sm pointer-events-auto">
-        <div>
-          <h1 className="text-2xl font-semibold text-black">Your Dashboard</h1>
-          <p className="mt-2 text-sm opacity-80 text-black">Select a channel from the left to view detailed analytics for the last 90 days.</p>
-        </div>
-      </main>
-      
-      <script dangerouslySetInnerHTML={{
-        __html: `
-          document.getElementById('connect-youtube-btn').onclick = function() {
-            const popup = window.open('/youtube-connect', 'youtube', 'width=500,height=600');
-            window.addEventListener('message', function(event) {
-              if (event.data && event.data.type === 'youtube-connected') {
-                popup.close();
-                const channelIds = event.data.channelIds;
-                if (channelIds && channelIds.length > 0) {
-                  // Redirect to collection page with the first channel
-                  window.location.href = '/dashboard/collection?channelId=' + encodeURIComponent(channelIds[0]);
-                } else {
-                  // Fallback to reload if no channel IDs
-                  window.location.reload();
-                }
-              }
-            });
-          };
+  // Get the last used channel from google_accounts table
+  const admin = createSupabaseAdminClient();
+  const { data: googleAccount } = await admin
+    .from("google_accounts")
+    .select("last_channel_used")
+    .eq("user_id", user.id)
+    .single();
 
-          document.getElementById('wipe-data-btn').onclick = async function() {
-            if (confirm('Are you sure you want to wipe all your data? This will delete all channels and Google accounts and cannot be undone.')) {
-              try {
-                const response = await fetch('/api/wipe-all-data', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                });
+  let targetChannelId = googleAccount?.last_channel_used;
 
-                const result = await response.json();
+  // If no last used channel or it doesn't exist in current channels, use the first channel
+  if (!targetChannelId || !channels.find(c => c.channel_id === targetChannelId)) {
+    targetChannelId = channels[0].channel_id;
+    
+    // Update the last_channel_used in the database
+    await admin
+      .from("google_accounts")
+      .update({ last_channel_used: targetChannelId })
+      .eq("user_id", user.id);
+  }
 
-                if (result.success) {
-                  alert('All data has been wiped successfully.');
-                  window.location.href = '/';
-                } else {
-                  alert('Error: ' + (result.error || 'Failed to wipe data'));
-                }
-              } catch (error) {
-                console.error('Error wiping data:', error);
-                alert('Error: Failed to wipe data');
-              }
-            }
-          };
-        `
-      }} />
-    </div>
-  );
+  // Redirect to the last used channel's latest-video page
+  redirect(`/dashboard/${encodeURIComponent(targetChannelId)}/latest-video`);
 }

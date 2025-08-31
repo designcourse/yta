@@ -10,7 +10,8 @@
       "Bash(cmd /c:*)",
       "Bash(powershell:*)",
       "Bash(git add:*)",
-      "Bash(del nul)"
+      "Bash(del nul)",
+      "Bash(npm run lint)"
     ],
     "deny": [],
     "ask": []

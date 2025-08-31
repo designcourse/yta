@@ -5,9 +5,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 interface NeriaResponseProps {
   response: string;
   isVisible: boolean;
+  onComplete?: () => void;
+  isStrategy?: boolean; // For smaller font and different batching
+  onExitComplete?: () => void; // Called when exit animation finishes
 }
 
-function useStaggeredWords(text: string) {
+function useStaggeredWords(text: string, isStrategy: boolean = false) {
   return useMemo(() => {
     // Comprehensive filtering of problematic characters
     const cleanedText = text
@@ -26,10 +29,11 @@ function useStaggeredWords(text: string) {
       return cleanSentence.length > 0;
     });
 
-    // Group sentences into batches of 2
+    // Group sentences into batches - 4 for strategy, 2 for regular
+    const batchSize = isStrategy ? 4 : 2;
     const sentenceBatches: string[][] = [];
-    for (let i = 0; i < cleanSentences.length; i += 2) {
-      sentenceBatches.push(cleanSentences.slice(i, i + 2));
+    for (let i = 0; i < cleanSentences.length; i += batchSize) {
+      sentenceBatches.push(cleanSentences.slice(i, i + batchSize));
     }
 
     // Process each batch into words and characters
@@ -66,17 +70,18 @@ function useStaggeredWords(text: string) {
     });
 
     return result;
-  }, [text]);
+  }, [text, isStrategy]);
 }
 
-export default function NeriaResponse({ response, isVisible }: NeriaResponseProps) {
+export default function NeriaResponse({ response, isVisible, onComplete, isStrategy, onExitComplete }: NeriaResponseProps) {
   const [currentBatch, setCurrentBatch] = useState(0);
   const [fadingOutBatch, setFadingOutBatch] = useState<number | null>(null);
   const [showAnimation, setShowAnimation] = useState(false);
   const [animatingBatch, setAnimatingBatch] = useState<number | null>(null);
+  // Exit animation removed
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const animatedText = useStaggeredWords(response);
+  const animatedText = useStaggeredWords(response, isStrategy);
 
   // Get unique batches
   const batches = useMemo(() => {
@@ -97,6 +102,7 @@ export default function NeriaResponse({ response, isVisible }: NeriaResponseProp
 
   useEffect(() => {
     if (isVisible && !showAnimation) {
+      console.log('🎭 NeriaResponse: Starting animation for:', response.substring(0, 50));
       // Small delay to ensure component is rendered
       const timer = setTimeout(() => {
         setShowAnimation(true);
@@ -105,6 +111,14 @@ export default function NeriaResponse({ response, isVisible }: NeriaResponseProp
       return () => clearTimeout(timer);
     }
   }, [isVisible, showAnimation]);
+
+  // Reset animation when the response text changes
+  useEffect(() => {
+    setShowAnimation(false);
+    setAnimatingBatch(null);
+    setFadingOutBatch(null);
+    setCurrentBatch(0);
+  }, [response]);
 
   useEffect(() => {
     if (showAnimation && currentBatch < batches.length && containerRef.current) {
@@ -168,29 +182,46 @@ export default function NeriaResponse({ response, isVisible }: NeriaResponseProp
         // Schedule next batch after current batch animation completes
         if (currentBatch < batches.length - 1) {
           // Calculate total animation duration including sentence pauses
-          let totalDuration = cumulativeDelay;
+          const totalDuration = cumulativeDelay;
           console.log(`Scheduling batch transition: current=${currentBatch}, duration=${totalDuration}s, chars=${batchChars.length}`);
 
           const timer = setTimeout(() => {
             console.log(`Transitioning from batch ${currentBatch} to ${currentBatch + 1}`);
-            // Clear animating state and fade out current batch
-            setAnimatingBatch(null);
-            setFadingOutBatch(currentBatch);
-
-            // After fade out, move to next batch
-            setTimeout(() => {
-              setFadingOutBatch(null);
+            // For questions and short responses, don't fade out - keep all batches visible
+            if (batches.length <= 2) {
+              // Don't fade out for short responses - just move to next batch while keeping current visible
               setCurrentBatch(currentBatch + 1);
-            }, 500); // 0.5s fade out duration
-          }, (totalDuration + 3) * 1000); // 3s pause after animation
+            } else {
+              // For longer responses, fade out current batch
+              setAnimatingBatch(null);
+              setFadingOutBatch(currentBatch);
+
+              // After fade out, move to next batch
+              setTimeout(() => {
+                setFadingOutBatch(null);
+                setCurrentBatch(currentBatch + 1);
+              }, 500); // 0.5s fade out duration
+            }
+          }, (totalDuration + 1.5) * 1000); // Reduced from 3s to 1.5s pause after animation
 
           return () => clearTimeout(timer);
         } else {
-          console.log(`Final batch ${currentBatch} completed, no more transitions`);
+          console.log(`Final batch ${currentBatch} completed, keeping text visible and calling onComplete`);
+          const totalDuration = cumulativeDelay;
+          const finalTimer = setTimeout(() => {
+            // Keep the batch visible by maintaining animatingBatch state
+            setAnimatingBatch(currentBatch);
+            setFadingOutBatch(null);
+            console.log('🎭 Animation completed, text should remain visible');
+            if (onComplete) {
+              try { onComplete(); } catch {}
+            }
+          }, (totalDuration + 0.2) * 1000);
+          return () => clearTimeout(finalTimer);
         }
       }, 100); // Small delay for DOM readiness
     }
-  }, [showAnimation, currentBatch, batches]);
+  }, [showAnimation, currentBatch, batches, onComplete]);
 
   if (!isVisible) return null;
 
@@ -203,40 +234,60 @@ export default function NeriaResponse({ response, isVisible }: NeriaResponseProp
         <div className="flex-1 min-w-0 text-black pr-[clamp(16px,3vw,48px)] overflow-visible hero-fade-in">
 
 
-          <div className="text-[clamp(24px,3vw,48px)] font-normal leading-[1.1] break-normal">
-            {batches.map((batch) => (
-              <div
-                key={`batch-${batch.batchIndex}`}
-                className={`transition-opacity duration-500 ${
-                  fadingOutBatch === batch.batchIndex ? 'opacity-0' : 'opacity-100'
-                }`}
-                style={{
-                  display: (batch.batchIndex === currentBatch && batch.batchIndex === animatingBatch) || batch.batchIndex === fadingOutBatch ? 'inline' : 'none'
-                }}
-              >
-                {batch.items.map((wordOrSpace) => (
-                  <span
-                    key={`word-${wordOrSpace.wordIndex}`}
-                    className={wordOrSpace.isSpace ? "inline" : "inline-block"}
-                  >
-                    {wordOrSpace.chars.map(({ char, globalIndex, localIndex }) => (
-                      <span
-                        key={`char-${globalIndex}-${char}-${localIndex}`}
-                        data-char
-                        data-batch={wordOrSpace.batchIndex}
-                        className="inline-block will-change-transform opacity-0"
-                        style={{
-                          animationDelay: `${0.5 + localIndex * 0.04}s`,
-                          animation: 'heroChar 1200ms cubic-bezier(0.2, 0.7, 0.2, 1) both'
-                        }}
-                      >
-                        {char === " " ? "\u00A0" : char}
-                      </span>
-                    ))}
-                  </span>
-                ))}
-              </div>
-            ))}
+          <div className={`font-normal leading-[1.1] break-normal ${isStrategy ? 'text-[clamp(20px,2.5vw,40px)]' : 'text-[clamp(24px,3vw,48px)]'}`}>
+            {batches.map((batch) => {
+              // For short responses (questions), show all batches that have been reached
+              const isShortResponse = batches.length <= 2;
+              const isVisible = isShortResponse 
+                ? (batch.batchIndex <= currentBatch && batch.batchIndex !== fadingOutBatch)
+                : (batch.batchIndex === currentBatch || batch.batchIndex === fadingOutBatch);
+              
+              if (batch.batchIndex === 0) {
+                console.log('🎭 Batch 0 display state:', {
+                  batchIndex: batch.batchIndex,
+                  currentBatch,
+                  animatingBatch,
+                  fadingOutBatch,
+                  isVisible,
+                  showAnimation,
+                  isShortResponse,
+                  totalBatches: batches.length
+                });
+              }
+              return (
+                <div
+                  key={`batch-${batch.batchIndex}`}
+                  className={`transition-opacity duration-500 ${
+                    fadingOutBatch === batch.batchIndex ? 'opacity-0' : 'opacity-100'
+                  }`}
+                  style={{
+                    display: isVisible ? 'inline' : 'none'
+                  }}
+                >
+                  {batch.items.map((wordOrSpace) => (
+                    <span
+                      key={`word-${wordOrSpace.wordIndex}`}
+                      className={wordOrSpace.isSpace ? "inline" : "inline-block"}
+                    >
+                      {wordOrSpace.chars.map(({ char, globalIndex, localIndex }) => (
+                        <span
+                          key={`char-${globalIndex}-${char}-${localIndex}`}
+                          data-char
+                          data-batch={wordOrSpace.batchIndex}
+                          className="inline-block will-change-transform opacity-0"
+                          style={{
+                            animationDelay: `${0.5 + localIndex * 0.04}s`,
+                            animation: 'heroChar 1200ms cubic-bezier(0.2, 0.7, 0.2, 1) both'
+                          }}
+                        >
+                          {char === " " ? "\u00A0" : char}
+                        </span>
+                      ))}
+                    </span>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
