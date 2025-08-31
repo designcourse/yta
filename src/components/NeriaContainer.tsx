@@ -23,6 +23,7 @@ const NeriaContainer: React.FC = () => {
   const [initialLoading, setInitialLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadThreadAndMessages = useCallback(async () => {
     if (!currentChannelId) return;
@@ -80,6 +81,11 @@ const NeriaContainer: React.FC = () => {
     }
   }, [threadId, currentChannelId]);
 
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   const sendMessage = useCallback(async () => {
     const value = inputValue.trim();
     if (!value) return;
@@ -90,6 +96,14 @@ const NeriaContainer: React.FC = () => {
       { id: tempId, role: 'user', content: value, created_at: new Date().toISOString() },
     ]);
     setInputValue("");
+    
+    const assistantId = `asst-${Date.now()}`;
+    // Add empty assistant message that will be populated as we stream
+    setMessages((prev) => [
+      ...prev,
+      { id: assistantId, role: 'assistant', content: '', created_at: new Date().toISOString() },
+    ]);
+
     try {
       setSending(true);
       const res = await fetch('/api/neria/chat', {
@@ -97,28 +111,66 @@ const NeriaContainer: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelId: currentChannelId, threadId, message: value })
       });
+      
       if (!res.ok) {
         console.error('Chat failed');
+        // Remove the empty assistant message on error
+        setMessages((prev) => prev.filter(m => m.id !== assistantId));
         return;
       }
-      const data = await res.json();
-      if (data?.threadId && !threadId) setThreadId(data.threadId);
-      const reply: string = data?.reply || '';
-      if (reply) {
-        setMessages((prev) => [
-          ...prev,
-          { id: `asst-${Date.now()}`, role: 'assistant', content: reply, created_at: new Date().toISOString() },
-        ]);
-      } else {
-        // Fallback: background refresh if no reply in body
-        const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(data?.threadId || threadId)}`);
-        if (mRes.ok) {
-          const m = await mRes.json();
-          setMessages(m.messages || []);
+
+      if (!res.body) {
+        console.error('No response body');
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                
+                if (data.type === 'init' && data.threadId && !threadId) {
+                  setThreadId(data.threadId);
+                } else if (data.type === 'chunk' && data.content) {
+                  // Update the assistant message with the new content
+                  setMessages((prev) => prev.map(m => 
+                    m.id === assistantId 
+                      ? { ...m, content: m.content + data.content }
+                      : m
+                  ));
+                } else if (data.type === 'done') {
+                  // Streaming complete
+                  break;
+                } else if (data.type === 'error') {
+                  console.error('Streaming error:', data.error);
+                  break;
+                }
+              } catch (parseError) {
+                console.error('Error parsing SSE data:', parseError);
+              }
+            }
+          }
         }
+      } finally {
+        reader.releaseLock();
       }
     } catch (err) {
-      console.error(err);
+      console.error('Streaming error:', err);
+      // Remove the empty assistant message on error
+      setMessages((prev) => prev.filter(m => m.id !== assistantId));
     } finally {
       setSending(false);
     }
@@ -366,6 +418,7 @@ const NeriaContainer: React.FC = () => {
                     )}
                   </div>
                 ))}
+                <div ref={messagesEndRef} />
               </div>
             )}
           </div>

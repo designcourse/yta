@@ -239,43 +239,77 @@ export async function POST(request: Request) {
     for (const m of history) messages.push({ role: m.role as any, content: m.content });
     messages.push({ role: "user", content: body.message });
 
-    // Call model
+    // Call model with streaming
     const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
+    const stream = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages,
       temperature: 0.4,
       max_tokens: 800,
+      stream: true,
     });
 
-    const assistantContent = completion.choices?.[0]?.message?.content || "";
+    let assistantContent = "";
 
-    // Store assistant message
-    await supabase
-      .from("chat_messages")
-      .insert({ thread_id: threadId, role: "assistant", content: assistantContent });
+    // Create a readable stream for the response
+    const encoder = new TextEncoder();
+    const readableStream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Send initial data with threadId
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'init', threadId })}\n\n`));
 
-    // Lightweight summarization trigger: if messages exceed 30, create/update a summary
-    const { data: countRows } = await supabase
-      .from("chat_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("thread_id", threadId);
-    const count = (countRows as any)?.length ?? 0;
-    if (count > 30) {
-      try {
-        const summaryPrompt = "Summarize the conversation so far into a compact brief focusing on user goals, decisions, action items, and unresolved questions. Keep under 200 words.";
-        const summaryMsgs = [{ role: "system" as const, content: summaryPrompt }, ...history.slice(-20)];
-        const sum = await openai.chat.completions.create({ model: "gpt-4o-mini", messages: summaryMsgs as any, max_tokens: 300, temperature: 0 });
-        const summaryText = sum.choices?.[0]?.message?.content || null;
-        if (summaryText) {
+          for await (const chunk of stream) {
+            const content = chunk.choices[0]?.delta?.content;
+            if (content) {
+              assistantContent += content;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', content })}\n\n`));
+            }
+          }
+
+          // Store the complete assistant message
           await supabase
-            .from("thread_summaries")
-            .insert({ thread_id: threadId, summary_text: summaryText });
-        }
-      } catch {}
-    }
+            .from("chat_messages")
+            .insert({ thread_id: threadId, role: "assistant", content: assistantContent });
 
-    return NextResponse.json({ threadId, reply: assistantContent });
+          // Send completion signal
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.close();
+
+          // Handle summarization in background (don't block the stream)
+          const { data: countRows } = await supabase
+            .from("chat_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("thread_id", threadId);
+          const count = (countRows as any)?.length ?? 0;
+          if (count > 30) {
+            try {
+              const summaryPrompt = "Summarize the conversation so far into a compact brief focusing on user goals, decisions, action items, and unresolved questions. Keep under 200 words.";
+              const summaryMsgs = [{ role: "system" as const, content: summaryPrompt }, ...history.slice(-20)];
+              const sum = await openai.chat.completions.create({ model: "gpt-4o-mini", messages: summaryMsgs as any, max_tokens: 300, temperature: 0 });
+              const summaryText = sum.choices?.[0]?.message?.content || null;
+              if (summaryText) {
+                await supabase
+                  .from("thread_summaries")
+                  .insert({ thread_id: threadId, summary_text: summaryText });
+              }
+            } catch {}
+          }
+        } catch (error) {
+          console.error("Streaming error:", error);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Streaming failed' })}\n\n`));
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(readableStream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
   } catch (e: any) {
     console.error("Neria chat error:", e);
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });

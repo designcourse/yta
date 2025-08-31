@@ -49,6 +49,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - `channel_strategy` table: per-user+channel persisted plan_text used in coaching context
 
 #### 4. **Advanced Neria AI System**
+- **Real-time Streaming Responses**: Character-by-character streaming from OpenAI using Server-Sent Events (SSE)
 - **NeriaResponse Component**: Character-by-character animated text with enhanced batch processing
 - **Batch-Based Animation**: Text appears in 2-sentence chunks (4 for strategy responses) with intelligent pauses
 - **Smart Punctuation Timing**: 1-second pauses after periods/exclamation marks, 0.5-second pauses after commas (except in numbers)
@@ -56,7 +57,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Fade Transitions**: Smooth fade-out between text batches with improved performance
 - **AI Strategy Generation**: OpenAI-powered channel analysis and growth strategies
 - **Context-Aware Responses**: Maintains conversation context across multiple interactions
-- **NeriaContainer Component**: Floating AI assistant window with minimize/detach functionality
+- **NeriaContainer Component**: Floating AI assistant window with minimize/detach functionality and streaming chat
 
 #### 5. **Comprehensive Dashboard System**
 - **DashboardLayout Component**: Unified layout with sidebar navigation and channel selector
@@ -111,7 +112,7 @@ src/
 │   │   │   ├── generate-strategy/route.ts  # AI strategy generation
 │   │   │   ├── next-question/route.ts      # Dynamic Q&A
 │   │   │   ├── refine-plan/route.ts        # Plan refinement
-│   │   │   ├── chat/route.ts               # Send message, build context, store reply
+│   │   │   ├── chat/route.ts               # Streaming chat with SSE, build context, store reply
 │   │   │   ├── messages/route.ts           # List messages for a thread
 │   │   │   └── threads/route.ts            # List threads by user/channel
 │   │   └── google/user-and-tokens/route.ts  # Token management
@@ -300,6 +301,6 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - **Where it renders**: `components/DashboardLayout.tsx` and `components/ClientDashboardLayout.tsx` include `NeriaContainer`, so the chat is available across dashboard pages.
 - **Thread restoration**: on channel change/mount, `NeriaContainer` restores the last thread id from `localStorage` key `neria:lastThread:{channelId}`; if missing, it fetches the most recent thread for that channel via `GET /api/neria/threads?channelId=...`.
 - **History loading**: messages are loaded via `GET /api/neria/messages?threadId=...` and shown in the window.
-- **Send flow**: messages are optimistically added in the UI, then `POST /api/neria/chat` is called with `{ channelId, threadId, message }`. The returned `threadId` is persisted if newly created, and the assistant reply is appended.
+- **Send flow**: messages are optimistically added in the UI, then `POST /api/neria/chat` is called with `{ channelId, threadId, message }`. The response streams in real-time using Server-Sent Events, with text appearing character-by-character as generated. The `threadId` is persisted if newly created.
 - **Per-channel memory**: last thread id is persisted per channel in `localStorage`, enabling seamless continuity as users navigate dashboard pages for the same channel.
 - **UI behavior**: the chat window can be minimized or detached into a floating, draggable/resizable panel; state is managed via `NeriaContext` and component state.
