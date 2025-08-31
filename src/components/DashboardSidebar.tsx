@@ -98,7 +98,7 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
 
         {/* Sidebar Nav */}
         {currentChannelId && (
-          <nav className="space-y-10 mb-9 font-bold">
+          <nav className="space-y-5 mb-9 font-bold">
             <Link
               href={`/dashboard/${encodeURIComponent(currentChannelId)}/latest-video`}
               className={`block text-base ${
@@ -147,7 +147,7 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
 
         {/* Sidebar Subnav */}
         {currentChannelId && (
-          <nav className="space-y-9">
+          <nav className="space-y-4">
             <Link
               href={`/dashboard/${encodeURIComponent(currentChannelId)}/my-goals`}
               className={`block text-base ${
@@ -186,7 +186,7 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
         </button>
 
         {/* Footer Nav */}
-        <nav className="space-y-9 pt-4">
+        <nav className="space-y-4 pt-4">
           <Link
             href="/account"
             className="block text-base text-gray-600 hover:text-gray-900"

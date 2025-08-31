@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import DashboardSidebar from "./DashboardSidebar";
 import ChannelSelector from "./ChannelSelector";
+import NeriaContainer from "./NeriaContainer";
 import { redirect } from "next/navigation";
 
 interface DashboardLayoutProps {
@@ -52,8 +53,8 @@ export default async function DashboardLayout({
         `
       }} />
       
-      {/* Container with 77% width minus sidebar */}
-      <div className="ml-[213px] flex" style={{ width: 'calc(77% - 213px)' }}>
+      {/* Container with adjusted width to account for Neria Container */}
+      <div className="ml-[213px] flex" style={{ width: 'calc(100% - 213px - min(460px, 25vw))' }}>
         {/* Sidebar - Fixed width */}
         <DashboardSidebar 
           channels={channels} 
@@ -79,6 +80,9 @@ export default async function DashboardLayout({
           </main>
         </div>
       </div>
+
+      {/* Neria Container - Fixed right aligned */}
+      <NeriaContainer />
     </div>
   );
 }
