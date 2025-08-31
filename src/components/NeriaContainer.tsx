@@ -522,7 +522,7 @@ const NeriaContainer: React.FC = () => {
       )}
 
       {/* Main Neria Container - Dark Theme */}
-      <div className={`h-full flex flex-col rounded-md ${isFullscreen ? 'p-4' : ''}`} style={{ backgroundColor: '#313344' }}>
+      <div className={`h-full flex flex-col rounded-md ${isFullscreen ? 'p-4' : ''} ${(sending || initialLoading) ? 'neria-loading-border' : ''}`} style={{ backgroundColor: '#313344' }}>
         
         {/* Neria Chat Area */}
         <div className="flex-1" style={{ height: 'calc(100% - 120px)' }}>
