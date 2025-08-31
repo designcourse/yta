@@ -23,6 +23,7 @@ const DashboardContent: React.FC<DashboardContentProps> = ({
   const { isFullscreen, setCurrentChannelId } = useNeria();
 
   React.useEffect(() => {
+    console.log('DashboardContent: Setting currentChannelId to:', currentChannelId);
     setCurrentChannelId(currentChannelId);
   }, [currentChannelId, setCurrentChannelId]);
 

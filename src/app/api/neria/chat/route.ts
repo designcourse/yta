@@ -148,22 +148,9 @@ type ChatPostBody = {
 };
 
 async function getOrCreateThread(supabase: any, userId: string, channelId?: string) {
-  // If a thread exists for user+channel, reuse the most recent; else create
+  // ALWAYS require channelId for proper isolation
   if (!channelId) {
-    const { data: thread } = await supabase
-      .from("chat_threads")
-      .select("id")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-    if (thread) return thread.id as string;
-    const { data: created } = await supabase
-      .from("chat_threads")
-      .insert({ user_id: userId, title: "Conversation" })
-      .select("id")
-      .single();
-    return created?.id as string;
+    throw new Error("channelId is required for thread creation/lookup to ensure proper channel isolation");
   }
 
   // Resolve provided channel id: prefer external YouTube channel_id; if it's a UUID, allow id match
@@ -173,19 +160,10 @@ async function getOrCreateThread(supabase: any, userId: string, channelId?: stri
     .from("channels")
     .select("id")
     .eq("user_id", userId)
-    .eq("channel_id", channelId)
+    .eq("channel_id", channelId)  // Look for YouTube channel ID
     .maybeSingle();
-  if (byExternal?.id) {
-    channel = byExternal;
-  } else if (uuidPattern.test(channelId)) {
-    const { data: byUuid } = await supabase
-      .from("channels")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("id", channelId)
-      .maybeSingle();
-    if (byUuid?.id) channel = byUuid;
-  }
+  
+  channel = byExternal;
 
   const internalChannelId = channel?.id as string | undefined;
 
@@ -621,8 +599,8 @@ Examples:
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChatPostBody;
-    if (!body.message || (!body.threadId && !body.channelId)) {
-      return NextResponse.json({ error: "message and threadId or channelId required" }, { status: 400 });
+    if (!body.message || !body.channelId) {
+      return NextResponse.json({ error: "message and channelId required for proper channel isolation" }, { status: 400 });
     }
 
     const supabase = await createSupabaseServerClient();
@@ -631,7 +609,44 @@ export async function POST(request: Request) {
 
 
 
-    const threadId = body.threadId || (await getOrCreateThread(supabase, user.id, body.channelId));
+    // Always ensure thread is associated with the correct channel
+    // Don't trust threadId from client if channelId is provided - validate it belongs to the channel
+    let threadId: string;
+    if (body.threadId && body.channelId) {
+      // Verify the provided threadId actually belongs to this channel
+      const { data: threadValidation } = await supabase
+        .from("chat_threads")
+        .select("channel_id")
+        .eq("id", body.threadId)
+        .eq("user_id", user.id)
+        .single();
+      
+      if (threadValidation) {
+        // Resolve the channel to get internal UUID
+        const { data: channelData } = await supabase
+          .from("channels")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("channel_id", body.channelId)  // Look for YouTube channel ID
+          .single();
+        
+        const expectedChannelId = channelData?.id;
+        
+        // If thread belongs to the expected channel, use it; otherwise create new one
+        if (threadValidation.channel_id === expectedChannelId) {
+          threadId = body.threadId;
+        } else {
+          console.log('Thread validation failed: thread belongs to different channel');
+          threadId = await getOrCreateThread(supabase, user.id, body.channelId);
+        }
+      } else {
+        console.log('Thread validation failed: thread not found or not owned by user');
+        threadId = await getOrCreateThread(supabase, user.id, body.channelId);
+      }
+    } else {
+      // Use the provided threadId or create new one
+      threadId = body.threadId || (await getOrCreateThread(supabase, user.id, body.channelId));
+    }
 
     // Store user message
     await supabase

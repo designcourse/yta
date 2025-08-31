@@ -47,36 +47,65 @@ const NeriaContainer: React.FC = () => {
     }
   }, [threadId]);
 
+
+
   const loadThreadAndMessages = useCallback(async () => {
-    if (!currentChannelId) return;
+    console.log('Neria: loadThreadAndMessages called with channelId:', currentChannelId);
+    if (!currentChannelId) {
+      // Clear everything if no channel is selected
+      console.log('Neria: No channelId, clearing state');
+      setThreadId(undefined);
+      setMessages([]);
+      setContextPercentage(0);
+      return;
+    }
+    
     try {
       setInitialLoading(true);
-      // Try restore from localStorage first
+      
+      // Clear existing state immediately when switching channels
+      setMessages([]);
+      setContextPercentage(0);
+      
+      // Try restore from localStorage first, but validate it belongs to this channel
       try {
         const restored = localStorage.getItem(`neria:lastThread:${currentChannelId}`);
+        console.log('Neria: Checking localStorage for channel', currentChannelId, 'found:', restored);
         if (restored) {
-          setThreadId(restored);
-          const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(restored)}`);
-          if (mRes.ok) {
-            const m = await mRes.json();
+          // Validate that this thread actually belongs to the current channel
+          const validationRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(restored)}&channelId=${encodeURIComponent(currentChannelId)}`);
+          if (validationRes.ok) {
+            const m = await validationRes.json();
+            console.log('Neria: Loaded messages from localStorage thread:', m.messages?.length || 0, 'messages');
+            setThreadId(restored);
             setMessages(m.messages || []);
             if (m.contextPercentage !== undefined) {
               setContextPercentage(m.contextPercentage);
             }
             setInitialLoading(false);
             return;
+          } else {
+            console.log('Neria: Failed to validate localStorage thread (status:', validationRes.status, '), clearing it');
+            localStorage.removeItem(`neria:lastThread:${currentChannelId}`);
+            // Clear the bad threadId from state as well
+            setThreadId(undefined);
           }
         }
       } catch {}
+      
+      // Fetch most recent thread for this specific channel
+      console.log('Neria: Fetching threads for channel:', currentChannelId);
       const tRes = await fetch(`/api/neria/threads?channelId=${encodeURIComponent(currentChannelId)}`);
       if (tRes.ok) {
         const data = await tRes.json();
+        console.log('Neria: API returned threads:', data.threads?.length || 0, 'threads');
         const first = (data.threads || [])[0];
         if (first?.id) {
           setThreadId(first.id);
-          const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(first.id)}`);
+          const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(first.id)}&channelId=${encodeURIComponent(currentChannelId)}`);
           if (mRes.ok) {
             const m = await mRes.json();
+            console.log('Neria: Loaded messages from API thread:', m.messages?.length || 0, 'messages');
             setMessages(m.messages || []);
             if (m.contextPercentage !== undefined) {
               setContextPercentage(m.contextPercentage);
@@ -85,12 +114,22 @@ const NeriaContainer: React.FC = () => {
             setMessages([]);
           }
         } else {
+          console.log('Neria: No threads found for channel, starting fresh');
           setThreadId(undefined);
           setMessages([]);
         }
+      } else {
+        // If API call fails, ensure we clear everything
+        console.log('Neria: API call failed, clearing state');
+        setThreadId(undefined);
+        setMessages([]);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading thread and messages:', e);
+      // Clear state on error to prevent showing wrong channel's data
+      setThreadId(undefined);
+      setMessages([]);
+      setContextPercentage(0);
     } finally {
       setInitialLoading(false);
     }
@@ -99,6 +138,41 @@ const NeriaContainer: React.FC = () => {
   useEffect(() => {
     loadThreadAndMessages();
   }, [loadThreadAndMessages]);
+
+  // Track if component has mounted to avoid clearing on initial undefined state
+  const hasMountedRef = useRef(false);
+  
+  // Additional effect to immediately clear chat when channel changes
+  const prevChannelRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const prevChannelId = prevChannelRef.current;
+    
+    // Skip initial mount when currentChannelId might be undefined
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      prevChannelRef.current = currentChannelId;
+      return;
+    }
+    
+    console.log('Neria: Channel changed from', prevChannelId, 'to:', currentChannelId);
+    
+    // Only clear state if we actually have a previous channel and it's different
+    if (prevChannelId && prevChannelId !== currentChannelId) {
+      // Clear messages immediately when channel changes to prevent showing wrong channel's data
+      setMessages([]);
+      setContextPercentage(0);
+      setThreadId(undefined);
+      
+      // Clear any stale localStorage entries from previous channels
+      try {
+        localStorage.removeItem(`neria:lastThread:${prevChannelId}`);
+        console.log('Neria: Cleared localStorage for previous channel:', prevChannelId);
+      } catch {}
+    }
+    
+    // Update the ref for next time
+    prevChannelRef.current = currentChannelId;
+  }, [currentChannelId]);
 
   // Listen for refresh messages event from planner redirect
   useEffect(() => {
@@ -119,6 +193,11 @@ const NeriaContainer: React.FC = () => {
       try {
         localStorage.setItem(`neria:lastThread:${currentChannelId}`, threadId);
       } catch {}
+    } else if (currentChannelId) {
+      // If no threadId but we have a channel, clear any stale localStorage entry
+      try {
+        localStorage.removeItem(`neria:lastThread:${currentChannelId}`);
+      } catch {}
     }
   }, [threadId, currentChannelId]);
 
@@ -129,7 +208,8 @@ const NeriaContainer: React.FC = () => {
 
   const sendMessage = useCallback(async () => {
     const value = inputValue.trim();
-    if (!value) return;
+    if (!value || !currentChannelId) return;
+    
     // Optimistically add user message
     const tempId = `temp-${Date.now()}`;
     setMessages((prev) => [

@@ -200,20 +200,45 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const threadId = searchParams.get("threadId");
+    const channelIdParam = searchParams.get("channelId");
     if (!threadId) return NextResponse.json({ error: "threadId required" }, { status: 400 });
 
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
-    // Ensure thread belongs to user
+    // Ensure thread belongs to user (and matches channel if provided)
     const { data: thread } = await supabase
       .from("chat_threads")
-      .select("id")
+      .select("id, channel_id")
       .eq("id", threadId)
       .eq("user_id", user.id)
       .single();
     if (!thread) return NextResponse.json({ error: "Thread not found" }, { status: 404 });
+
+    if (channelIdParam) {
+      console.log('Messages API: Validating thread', threadId, 'for channel', channelIdParam);
+      console.log('Messages API: Thread data:', thread);
+      
+      // Resolve external YouTube id to internal channel uuid
+      const { data: ch } = await supabase
+        .from("channels")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("channel_id", channelIdParam)  // Look for YouTube channel ID
+        .limit(1)
+        .maybeSingle();
+
+      console.log('Messages API: Channel lookup result:', ch);
+      console.log('Messages API: Comparing thread.channel_id', thread.channel_id, 'with ch.id', ch?.id);
+
+      if (!ch?.id || thread.channel_id !== ch.id) {
+        console.log('Messages API: Validation failed - returning 400');
+        return NextResponse.json({ error: "Thread does not belong to requested channel" }, { status: 400 });
+      }
+      
+      console.log('Messages API: Validation passed');
+    }
 
     const { data: messages } = await supabase
       .from("chat_messages")
