@@ -157,7 +157,44 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
       .eq("user_id", userId)
       .eq("channel_id", channelId)
       .single();
+    
     memoryProfile = mp || null;
+    
+    // If no memory profile exists, try to build one from channel_questions
+    if (!memoryProfile) {
+      const { data: answers } = await supabase
+        .from("channel_questions")
+        .select("question, answer")
+        .eq("channel_id", channelId)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true });
+      
+      if (answers && answers.length > 0) {
+        const goalsAnswer = answers.find(a => 
+          a.question && (a.question.toLowerCase().includes('goals') || 
+          a.question.toLowerCase().includes('primary goals'))
+        )?.answer || '';
+        
+        const timeAnswer = answers.find(a => 
+          a.question && (a.question.toLowerCase().includes('time') || 
+          a.question.toLowerCase().includes('commit'))
+        )?.answer || '';
+        
+        const aboutAnswer = answers.find(a => 
+          a.question && (a.question.toLowerCase().includes('about') || 
+          a.question.toLowerCase().includes('channel is about'))
+        )?.answer || '';
+
+        // Create a temporary memory profile from answers
+        if (goalsAnswer || timeAnswer || aboutAnswer) {
+          memoryProfile = {
+            goals: goalsAnswer ? `Goals: ${goalsAnswer}` : '',
+            preferences: aboutAnswer ? `Channel Focus: ${aboutAnswer}` : '',
+            constraints: timeAnswer ? `Time Commitment: ${timeAnswer}` : ''
+          };
+        }
+      }
+    }
   }
 
   // Stats summary: prefer stats_snapshots.latest else latest_video_snapshots

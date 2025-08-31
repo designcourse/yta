@@ -134,6 +134,45 @@ IMPORTANT: Write a SHORT strategy with EXACTLY 6 sentences or less. Cover the mo
         }, { onConflict: 'user_id,channel_id' });
     } catch {}
 
+    // Extract and persist user goals, preferences, and constraints from answers
+    try {
+      const goalsAnswer = (answers || []).find(a => 
+        a.question && a.question.toLowerCase().includes('goals') || 
+        a.question && a.question.toLowerCase().includes('primary goals')
+      )?.answer || '';
+      
+      const timeAnswer = (answers || []).find(a => 
+        a.question && a.question.toLowerCase().includes('time') || 
+        a.question && a.question.toLowerCase().includes('commit')
+      )?.answer || '';
+      
+      const aboutAnswer = (answers || []).find(a => 
+        a.question && a.question.toLowerCase().includes('about') || 
+        a.question && a.question.toLowerCase().includes('channel is about')
+      )?.answer || '';
+
+      // Build structured goals and preferences from the answers
+      const goals = goalsAnswer ? `Goals: ${goalsAnswer}` : '';
+      const preferences = aboutAnswer ? `Channel Focus: ${aboutAnswer}` : '';
+      const constraints = timeAnswer ? `Time Commitment: ${timeAnswer}` : '';
+
+      // Create or update memory profile only if we have some information
+      if (goals || preferences || constraints) {
+        await supabase
+          .from('memory_profile')
+          .upsert({
+            user_id: user.id,
+            channel_id: channelRecord.id,
+            goals,
+            preferences,
+            constraints,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'user_id,channel_id' });
+      }
+    } catch (e) {
+      console.warn('Failed to create memory profile:', e);
+    }
+
     return NextResponse.json({ strategy });
   } catch (e: any) {
     console.error('Strategy generation error:', e);
