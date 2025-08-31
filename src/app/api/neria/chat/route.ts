@@ -60,6 +60,10 @@ Respond ONLY with valid JSON in this exact format:
 }`;
 
   try {
+    // Get current model configuration
+    const modelConfig = await getCurrentModelWithSupabase(supabase);
+    const client = getClient(modelConfig.provider);
+    
     const completion = await client.chat.completions.create({
       model: modelConfig.model,
       messages: [
@@ -685,10 +689,39 @@ export async function POST(request: Request) {
       if (intent.action === 'generate_video_titles') {
         console.log('Video generation request detected - handling immediately');
         
+        // Check if redirect is required (user not on planner page)
+        const isOnPlannerPage = (body.currentUrl || '').includes('/planner');
+        
         // Return streaming response with proper events for frontend
         const stream = new ReadableStream({
           async start(controller) {
             const encoder = new TextEncoder();
+            
+            // If user needs to be redirected, send redirect event and end
+            if (!isOnPlannerPage && intent.requiresRedirect && intent.targetUrl) {
+              console.log('User not on planner page, redirecting to planner');
+              
+              // Generate contextual response first
+              const contextualResponse = await generateContextualResponse(body.message, pinned);
+              
+              // Store the brief response in database
+              await supabase
+                .from("chat_messages")
+                .insert({ thread_id: threadId, role: "assistant", content: contextualResponse });
+              
+              // Send the redirect event (include user's specific request so planner can use it)
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'redirect_to_planner',
+                message: contextualResponse,
+                channelId: pinned.channelMeta.externalId,
+                customPrompt: body.message
+              })}\n\n`));
+              
+              // End stream after redirect - planner page will handle generation
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+              controller.close();
+              return;
+            }
             
             // Send starting message  
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 

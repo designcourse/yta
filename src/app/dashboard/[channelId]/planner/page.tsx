@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ClientDashboardLayout from "@/components/ClientDashboardLayout";
 
@@ -37,6 +37,7 @@ export default function PlannerPage({
   const [generating, setGenerating] = useState(false);
   const [isGeneratingFromChat, setIsGeneratingFromChat] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
+  const redirectHandledRef = useRef(false);
 
   useEffect(() => {
     params.then(resolvedParams => {
@@ -44,27 +45,7 @@ export default function PlannerPage({
     });
   }, [params]);
 
-  // Check for redirect with loading state
-  useEffect(() => {
-    const generating = searchParams.get('generating');
-    if (generating === 'chat') {
-      // Set loading state when redirected from chat
-      setIsGeneratingFromChat(true);
-      setFadeOut(true);
-      
-      // Clear the URL parameter
-      const url = new URL(window.location.href);
-      url.searchParams.delete('generating');
-      window.history.replaceState({}, '', url.toString());
-      
-      // Add a small delay before dispatching refresh event to ensure all messages are saved
-      setTimeout(() => {
-        console.log('Redirect delay complete, requesting message refresh');
-        // Dispatch custom event to refresh Neria chat messages
-        window.dispatchEvent(new CustomEvent('refresh-neria-messages'));
-      }, 300);
-    }
-  }, [searchParams]);
+
 
   const fetchChannelData = useCallback(async () => {
     if (!channelId) return;
@@ -103,49 +84,126 @@ export default function PlannerPage({
     }
   }, [channelId]);
 
-  const fetchVideoIdeas = useCallback(async (forceRefresh = false) => {
-    if (!channelId) return;
+  const fetchVideoIdeas = useCallback(async (forceRefresh = false, customPrompt?: string) => {
+    if (!channelId) {
+      console.log('fetchVideoIdeas: No channelId provided');
+      return;
+    }
 
+    console.log('fetchVideoIdeas: Starting with channelId:', channelId, 'forceRefresh:', forceRefresh);
     setIsLoading(true);
     setError(null);
 
     try {
       let response;
       if (forceRefresh) {
+        console.log('fetchVideoIdeas: Making POST request for refresh');
         // Use POST for refresh
         response = await fetch('/api/video-planner-ideas', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ channelId }),
+          body: JSON.stringify({ channelId, customPrompt }),
         });
       } else {
+        console.log('fetchVideoIdeas: Making GET request');
         // Use GET for normal fetch
         response = await fetch(`/api/video-planner-ideas?channelId=${channelId}`);
       }
 
+      console.log('fetchVideoIdeas: Response status:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json();
+        console.error('fetchVideoIdeas: API error:', errorData);
         throw new Error(errorData.error || 'Failed to fetch video ideas');
       }
 
       const data = await response.json();
+      console.log('fetchVideoIdeas: Success, received ideas:', data.ideas?.length || 0);
       setVideoIdeas(data.ideas || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-      console.error('Error fetching video ideas:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+      console.error('fetchVideoIdeas: Error:', errorMessage, err);
+      setError(errorMessage);
     } finally {
+      console.log('fetchVideoIdeas: Setting isLoading to false');
       setIsLoading(false);
     }
-  }, [channelId]);
+  }, [channelId, isGeneratingFromChat]);
 
   useEffect(() => {
     if (channelId) {
       fetchChannelData();
-      fetchVideoIdeas();
+      const fromRedirect = searchParams.get('generating') === 'chat' && !redirectHandledRef.current;
+      if (!fromRedirect) {
+        fetchVideoIdeas();
+      }
     }
-  }, [channelId, fetchChannelData, fetchVideoIdeas]);
+  }, [channelId, fetchChannelData, fetchVideoIdeas, searchParams]);
+
+  // Check for redirect with loading state
+  useEffect(() => {
+    const generating = searchParams.get('generating');
+    // Only handle redirect once channelId is available
+    if (generating === 'chat' && !redirectHandledRef.current && channelId) {
+      redirectHandledRef.current = true;
+      setIsGeneratingFromChat(true);
+      setFadeOut(true);
+
+      // Schedule generation first so URL mutation doesn't cancel timers via re-render
+      setTimeout(async () => {
+        console.log('Redirect delay complete, starting video generation with channelId:', channelId);
+        window.dispatchEvent(new CustomEvent('refresh-neria-messages'));
+
+        // Set a backup timeout to prevent infinite loading
+        const backupTimeout = setTimeout(() => {
+          console.warn('Video generation took too long, clearing loading state');
+          setFadeOut(false);
+          setIsGeneratingFromChat(false);
+          // Force a GET refresh to reduce stale window
+          fetchVideoIdeas();
+        }, 30000);
+
+        try {
+          // Optimistic: dim grid while refreshing
+          setFadeOut(true);
+          const urlPrompt = new URL(window.location.href).searchParams.get('prompt') || undefined;
+          await fetchVideoIdeas(true, urlPrompt);
+          console.log('Video generation completed successfully');
+          clearTimeout(backupTimeout);
+          setTimeout(() => {
+            setIsGeneratingFromChat(false);
+            setFadeOut(false);
+          }, 10);
+        } catch (error) {
+          console.error('Video generation failed:', error);
+          clearTimeout(backupTimeout);
+          setTimeout(() => {
+            setIsGeneratingFromChat(false);
+            setFadeOut(false);
+          }, 10);
+        }
+      }, 600);
+
+      // Clear the URL parameter after scheduling the generation
+      const url = new URL(window.location.href);
+      url.searchParams.delete('generating');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [channelId, fetchVideoIdeas, searchParams]);
+
+  // Debug: Monitor loading state changes
+  useEffect(() => {
+    console.log('State changed:', {
+      isGeneratingFromChat,
+      isLoading,
+      generating,
+      fadeOut,
+      videoIdeasCount: videoIdeas.length
+    });
+  }, [isGeneratingFromChat, isLoading, generating, fadeOut, videoIdeas.length]);
 
   // Listen for video ideas generated from Neria chat
   useEffect(() => {
@@ -284,7 +342,17 @@ export default function PlannerPage({
         {/* Video Ideas Cards or Loading State */}
         <div className="relative">
           {/* Show loading overlay when generating, regardless of whether videos exist */}
-          {(generating || isGeneratingFromChat || (isLoading && videoIdeas.length === 0)) && (
+          {(() => {
+            const shouldShowLoading = (generating || isGeneratingFromChat || (isLoading && videoIdeas.length === 0));
+            console.log('Loading state check:', {
+              generating,
+              isGeneratingFromChat,
+              isLoading,
+              videoIdeasLength: videoIdeas.length,
+              shouldShowLoading
+            });
+            return shouldShowLoading;
+          })() && (
             <div className="absolute inset-0 flex items-center justify-center z-10">
               <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
             </div>

@@ -297,7 +297,8 @@ const NeriaContainer: React.FC = () => {
                   console.log('Redirecting to planner page:', data.message, 'channelId:', data.channelId);
                   if (data.channelId) {
                     // Add URL parameter to indicate video generation is in progress
-                    const targetUrl = `/dashboard/${data.channelId}/planner?generating=chat`;
+                    const promptParam = data.customPrompt ? `&prompt=${encodeURIComponent(data.customPrompt)}` : '';
+                    const targetUrl = `/dashboard/${data.channelId}/planner?generating=chat${promptParam}`;
                     console.log('Redirecting to URL:', targetUrl);
                     router.push(targetUrl);
                   } else {
