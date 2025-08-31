@@ -42,6 +42,11 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - `channels` table: user_id, channel_id, title, thumbnails, subscriber_count, video_count, view_count, published_at
 - `neria_context` table: channel_id, prompt_type, prompt_text for AI context storage
 - `channel_questions` table: channel_id, user_id, question, answer for onboarding data
+- `chat_threads` table: per-user and optional per-channel chat threads (title, metadata, timestamps)
+- `chat_messages` table: thread_id, role (user|assistant), content, created_at
+- `thread_summaries` table: thread_id, summary_text for compact conversation memory
+- `memory_profile` table: per-user+channel long-term profile (goals, preferences, constraints)
+- `channel_strategy` table: per-user+channel persisted plan_text used in coaching context
 
 #### 4. **Advanced Neria AI System**
 - **NeriaResponse Component**: Character-by-character animated text with enhanced batch processing
@@ -105,7 +110,10 @@ src/
 │   │   ├── neria/                          # AI assistant endpoints
 │   │   │   ├── generate-strategy/route.ts  # AI strategy generation
 │   │   │   ├── next-question/route.ts      # Dynamic Q&A
-│   │   │   └── refine-plan/route.ts        # Plan refinement
+│   │   │   ├── refine-plan/route.ts        # Plan refinement
+│   │   │   ├── chat/route.ts               # Send message, build context, store reply
+│   │   │   ├── messages/route.ts           # List messages for a thread
+│   │   │   └── threads/route.ts            # List threads by user/channel
 │   │   └── google/user-and-tokens/route.ts  # Token management
 │   ├── dashboard/
 │   │   ├── collection/page.tsx             # Data collection with AI animation
@@ -271,3 +279,27 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 1. **No scrollbars**: Layout uses fixed header/footer with flex-1 main content for full-height design
 2. **Text animation not working**: Ensure `animate-heroChar` CSS class is properly defined and characters have `data-char` attributes
 3. **Responsive text issues**: Text sizing uses Tailwind responsive classes (`text-lg sm:text-xl md:text-2xl lg:text-3xl`)
+
+## Neria Chat System & Context Memory Management
+
+### Server-side context and memory
+- **Pinned context assembly** (on `POST /api/neria/chat`):
+  - **Channel meta**: title and external YouTube id from `channels` via the thread's `channel_id`.
+  - **Memory profile**: long-term user+channel memory from `memory_profile` (goals, preferences, constraints).
+  - **Latest stats**: summary from `stats_snapshots` for period `latest`, falling back to `latest_video_snapshots` if needed.
+  - **Channel context**: `neria_context` rows for `channel_about` and `recent_video_titles` (parsed JSON list).
+  - **Strategy plan**: persisted coaching plan from `channel_strategy.plan_text`.
+  - These are merged into a single system prompt to ground replies in goals, constraints, channel context and current stats.
+- **Conversation history**: last 12 messages from `chat_messages` are included to preserve short-term context while controlling token usage.
+- **Storage**: user messages and assistant replies are appended to `chat_messages` under the thread.
+- **Summarization**: if a thread exceeds 30 messages, a compact summary is generated and stored in `thread_summaries` to aid long-term recall without sending the entire history.
+- **Thread resolution**: threads are looked up/created per user and optionally per channel (`chat_threads`), accepting either internal channel UUID or external YouTube `channel_id`.
+- **Auth & access control**: all routes require an authenticated Supabase user; message/thread reads validate ownership.
+
+### Dashboard chat window integration
+- **Where it renders**: `components/DashboardLayout.tsx` and `components/ClientDashboardLayout.tsx` include `NeriaContainer`, so the chat is available across dashboard pages.
+- **Thread restoration**: on channel change/mount, `NeriaContainer` restores the last thread id from `localStorage` key `neria:lastThread:{channelId}`; if missing, it fetches the most recent thread for that channel via `GET /api/neria/threads?channelId=...`.
+- **History loading**: messages are loaded via `GET /api/neria/messages?threadId=...` and shown in the window.
+- **Send flow**: messages are optimistically added in the UI, then `POST /api/neria/chat` is called with `{ channelId, threadId, message }`. The returned `threadId` is persisted if newly created, and the assistant reply is appended.
+- **Per-channel memory**: last thread id is persisted per channel in `localStorage`, enabling seamless continuity as users navigate dashboard pages for the same channel.
+- **UI behavior**: the chat window can be minimized or detached into a floating, draggable/resizable panel; state is managed via `NeriaContext` and component state.
