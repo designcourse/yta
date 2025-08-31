@@ -71,7 +71,17 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Loading States**: Enhanced loading indicators during data fetching and authentication
 - **PromptBar Component**: Interactive input component with auto-resize and keyboard shortcuts
 
-#### 6. **Advanced Data Collection & Analytics**
+#### 6. **AI-Powered Video Planner**
+- **Smart Title Generation**: GPT-4o powered video title suggestions based on channel context, user goals, and performance data
+- **6-Card Layout**: Responsive grid layout with 300px minimum width cards that adapt to screen size
+- **Database-Stored Avatars**: Efficient channel avatar loading from local database instead of YouTube API calls
+- **24-Hour Caching**: Intelligent caching system to avoid unnecessary AI generation while maintaining freshness
+- **Generate More Functionality**: One-click refresh for new title ideas with loading states
+- **Neria Chat Integration**: Custom title generation via chat commands with real-time updates
+- **Context-Aware Prompts**: Incorporates user memory profiles, channel strategy, and latest video performance
+- **Consistent Card Heights**: Fixed layout issues for varying title lengths with proper spacing
+
+#### 7. **Advanced Data Collection & Analytics**
 - **YouTube Analytics Integration**: Real-time data fetching with automatic token refresh
 - **Enhanced Data Collection**: Channel statistics, subscriber counts, video metrics, account age calculation
 - **Debug & Fix Endpoints**: Comprehensive debugging tools for channel associations and data integrity
@@ -79,7 +89,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Comprehensive Data Wipe**: Enhanced cleanup functionality covering all tables (chat_threads, messages, profiles, etc.)
 - **Error Handling**: Robust error handling with detailed logging and user feedback
 
-#### 7. **Context Awareness & Model Optimization**
+#### 8. **Context Awareness & Model Optimization**
 - **Real-time Context Tracking**: Visual indicator showing conversation context usage percentage
 - **ContextIndicator Component**: Cursor-style radial progress bar with precise token calculations
 - **Context Persistence**: Context percentage maintained across page refreshes and navigation
@@ -87,7 +97,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Dynamic Model Management**: Database-driven model selection with fallback configuration
 - **Token Estimation**: Reliable token counting without WebAssembly dependencies
 
-#### 8. **Technical Improvements**
+#### 9. **Technical Improvements**
 - **Hydration Safety**: Resolved React hydration mismatch errors
 - **Sidebar Navigation**: Fixed 213px sidebar with responsive main content area
 - **Responsive Typography**: Fluid text sizing that scales with viewport width

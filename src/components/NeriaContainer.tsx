@@ -167,6 +167,12 @@ const NeriaContainer: React.FC = () => {
                 } else if (data.type === 'done') {
                   // Streaming complete
                   break;
+                } else if (data.type === 'video_ideas_generated') {
+                  // Video ideas were generated, dispatch a custom event
+                  const event = new CustomEvent('video-ideas-generated', { 
+                    detail: { message: data.message }
+                  });
+                  window.dispatchEvent(event);
                 } else if (data.type === 'error') {
                   console.error('Streaming error:', data.error);
                   break;

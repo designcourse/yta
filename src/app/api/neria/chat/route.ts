@@ -8,6 +8,17 @@ function getOpenAI() {
   return new OpenAI({ apiKey });
 }
 
+function checkForVideoTitleRequest(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+  const titleKeywords = ['title', 'titles', 'video title', 'video titles', 'video idea', 'video ideas'];
+  const generateKeywords = ['generate', 'create', 'make', 'suggest', 'come up with', 'think of'];
+  
+  const hasTitleKeyword = titleKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasGenerateKeyword = generateKeywords.some(keyword => lowerMessage.includes(keyword));
+  
+  return hasTitleKeyword && hasGenerateKeyword;
+}
+
 async function getCurrentModel(supabase: any) {
   const { data: settings } = await supabase
     .from("model_settings")
@@ -289,6 +300,7 @@ function buildSystemPrompt(context: {
     "Always ground recommendations in the user's goals, constraints, the specific channel context, and latest stats.",
     channelLine,
     "When you make a suggestion, briefly explain why it matters and the expected impact.",
+    "If a user asks you to generate video titles or video ideas, tell them that you'll generate personalized title ideas for them and they can find them in the Video Planner section.",
     profile,
     stats,
     about,
@@ -381,6 +393,32 @@ export async function POST(request: Request) {
           await supabase
             .from("chat_messages")
             .insert({ thread_id: threadId, role: "assistant", content: assistantContent });
+
+          // Check if the user's message is asking for video title generation
+          const isVideoTitleRequest = checkForVideoTitleRequest(body.message);
+          if (isVideoTitleRequest && pinned.channelId) {
+            try {
+              // Generate video title ideas based on the custom prompt
+              const titleResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/video-planner-ideas`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  channelId: pinned.channelMeta?.externalId, 
+                  customPrompt: body.message 
+                })
+              });
+              
+              if (titleResponse.ok) {
+                // Send notification that video ideas were generated
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'video_ideas_generated',
+                  message: 'I\'ve generated new video title ideas based on your request. Check the Video Planner page to see them!'
+                })}\n\n`));
+              }
+            } catch (error) {
+              console.error('Error generating video ideas from chat:', error);
+            }
+          }
 
           // Send completion signal
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
