@@ -13,10 +13,12 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 ## Tech Stack
 - **Framework**: Next.js 15.5.0 with App Router
 - **Language**: TypeScript
-- **Styling**: Tailwind CSS
+- **Styling**: Tailwind CSS 4.0
 - **Database**: Supabase (PostgreSQL)
 - **Authentication**: Supabase Auth with Google OAuth
 - **APIs**: YouTube Data API v3, YouTube Analytics API
+- **AI**: OpenAI API for Neria AI assistant
+- **3D Graphics**: Spline (@splinetool/react-spline)
 - **External Libraries**: googleapis (for direct Google API access)
 
 ## Current Implementation Status
@@ -35,28 +37,45 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - Stores YouTube tokens for the original signed-in user
 - Supports multiple YouTube channels per user
 
-#### 3. **Database Schema**
-- `google_accounts` table: user_id, google_sub, account_email, access_token, refresh_token
-- `channels` table: user_id, channel_id, title, thumbnails
+#### 3. **Enhanced Database Schema**
+- `google_accounts` table: user_id, google_sub, account_email, access_token, refresh_token, last_channel_used
+- `channels` table: user_id, channel_id, title, thumbnails, subscriber_count, video_count, view_count, published_at
+- `neria_context` table: channel_id, prompt_type, prompt_text for AI context storage
+- `channel_questions` table: channel_id, user_id, question, answer for onboarding data
 
-#### 4. **Advanced AI Response System**
-- **NeriaResponse Component**: Character-by-character animated text
-- **Batch-Based Animation**: Text appears in 2-sentence chunks with 3-second pauses
+#### 4. **Advanced Neria AI System**
+- **NeriaResponse Component**: Character-by-character animated text with enhanced batch processing
+- **Batch-Based Animation**: Text appears in 2-sentence chunks (4 for strategy responses) with intelligent pauses
 - **Smart Punctuation Timing**: 1-second pauses after periods/exclamation marks, 0.5-second pauses after commas (except in numbers)
-- **Unicode Character Filtering**: Automatically removes replacement characters ("��") and other problematic Unicode
-- **Fade Transitions**: Smooth fade-out between text batches
+- **Unicode Character Filtering**: Comprehensive filtering of problematic Unicode characters and control sequences
+- **Fade Transitions**: Smooth fade-out between text batches with improved performance
+- **AI Strategy Generation**: OpenAI-powered channel analysis and growth strategies
+- **Context-Aware Responses**: Maintains conversation context across multiple interactions
+- **NeriaContainer Component**: Floating AI assistant window with minimize/detach functionality
 
-#### 5. **Enhanced UI/UX**
-- **CollectionHero Component**: Dedicated data collection interface with fixed status indicator
-- **Responsive Layout**: Full-height design with fixed header/footer, no scrollbars
-- **Fixed Status Indicator**: "COLLECTING DATA" positioned at bottom-left with responsive text sizing
-- **Loading States**: Proper loading indicators during hydration and data collection
+#### 5. **Comprehensive Dashboard System**
+- **DashboardLayout Component**: Unified layout with sidebar navigation and channel selector
+- **DashboardSidebar Component**: Channel navigation with dynamic routing and "Add Channel" functionality
+- **Channel-Specific Pages**: Dedicated routes for Latest Video, Video Planner, Best/Worst Performing, My Goals, Thumbnail Content
+- **YouTubeStats Component**: Real-time analytics display with 90-day metrics, subscriber growth, view counts
+- **Responsive Layout**: Full-height design with fixed sidebar (213px) and responsive content area
+- **Loading States**: Enhanced loading indicators during data fetching and authentication
+- **PromptBar Component**: Interactive input component with auto-resize and keyboard shortcuts
 
-#### 6. **Technical Improvements**
+#### 6. **Advanced Data Collection & Analytics**
+- **YouTube Analytics Integration**: Real-time data fetching with automatic token refresh
+- **Enhanced Data Collection**: Channel statistics, subscriber counts, video metrics, account age calculation
+- **Debug & Fix Endpoints**: Comprehensive debugging tools for channel associations and data integrity
+- **Last Channel Tracking**: Remembers user's last viewed channel for improved UX
+- **Data Wipe Functionality**: Administrative tools for complete data cleanup
+- **Error Handling**: Robust error handling with detailed logging and user feedback
+
+#### 7. **Technical Improvements**
 - **Hydration Safety**: Resolved React hydration mismatch errors
-- **Full-Height Layout**: Proper 100vh layout with fixed header (80px) and footer (51px)
+- **Sidebar Navigation**: Fixed 213px sidebar with responsive main content area
 - **Responsive Typography**: Fluid text sizing that scales with viewport width
-- **Animation Performance**: Optimized CSS animations with proper timing
+- **Animation Performance**: Optimized CSS animations with will-change properties
+- **Code Organization**: Improved component separation and reusability
 
 ### 🔧 Key Technical Solutions
 
@@ -76,32 +95,59 @@ src/
 │   │   └── signin/page.tsx            # Sign-in page
 │   ├── api/
 │   │   ├── youtube-connect/route.ts   # YouTube token exchange
+│   │   ├── youtube-stats/route.ts     # Real-time YouTube analytics
 │   │   ├── get-youtube-channels/route.ts
 │   │   ├── add-youtube-channel/route.ts
-│   │   ├── collect-youtube-data/route.ts    # Data collection endpoint
+│   │   ├── collect-youtube-data/route.ts    # Enhanced data collection with debug/fix
+│   │   ├── check-user-channels/route.ts     # Channel validation
+│   │   ├── update-last-channel/route.ts     # Last channel tracking
+│   │   ├── wipe-all-data/route.ts          # Data cleanup
+│   │   ├── neria/                          # AI assistant endpoints
+│   │   │   ├── generate-strategy/route.ts  # AI strategy generation
+│   │   │   ├── next-question/route.ts      # Dynamic Q&A
+│   │   │   └── refine-plan/route.ts        # Plan refinement
 │   │   └── google/user-and-tokens/route.ts  # Token management
 │   ├── dashboard/
-│   │   ├── collection/page.tsx       # Data collection with AI animation
-│   │   ├── [channelId]/page.tsx      # Channel-specific dashboard
-│   │   └── page.tsx                  # Main dashboard
-│   ├── youtube-connect/page.tsx       # YouTube OAuth popup initiator
-│   ├── youtube-callback/page.tsx      # YouTube OAuth callback handler
-│   ├── layout.tsx                     # Root layout with header/footer
-│   └── page.tsx                       # Home page
+│   │   ├── collection/page.tsx             # Data collection with AI animation
+│   │   ├── [channelId]/                    # Channel-specific routes
+│   │   │   ├── page.tsx                    # Channel overview (redirects to latest-video)
+│   │   │   ├── latest-video/page.tsx       # Latest video analytics
+│   │   │   ├── planner/page.tsx            # AI-powered video planner
+│   │   │   ├── best-performing/page.tsx    # Top performing content
+│   │   │   ├── worst-performing/page.tsx   # Underperforming content analysis
+│   │   │   ├── my-goals/page.tsx           # Goal setting and tracking
+│   │   │   └── thumbnail-content/page.tsx  # Thumbnail optimization
+│   │   └── page.tsx                        # Main dashboard (redirects to last channel)
+│   ├── account/page.tsx                    # Account settings
+│   ├── support/page.tsx                    # Support page
+│   ├── onboard/page.tsx                    # User onboarding
+│   ├── youtube-connect/page.tsx            # YouTube OAuth popup initiator
+│   ├── youtube-callback/page.tsx           # YouTube OAuth callback handler
+│   ├── layout.tsx                          # Root layout
+│   └── page.tsx                            # Home page
 ├── components/
 │   ├── AuthButtons.tsx                # Sign in/out buttons
-│   ├── CollectionHero.tsx             # Data collection interface with fixed status
+│   ├── ChannelSelector.tsx            # Channel switching interface
+│   ├── CollectionHero.tsx             # Data collection interface
+│   ├── ConditionalLayout.tsx          # Conditional layout wrapper
+│   ├── DashboardLayout.tsx            # Main dashboard layout with sidebar
+│   ├── DashboardSidebar.tsx           # Navigation sidebar with channels
 │   ├── Footer.tsx                     # Fixed bottom footer
 │   ├── Header.tsx                     # Navigation header with hydration safety
-│   ├── Hero.tsx                       # Landing page hero
-│   ├── NeriaResponse.tsx              # AI response with batch animation
+│   ├── Hero.tsx                       # Landing page hero with staggered animations
+│   ├── NeriaContainer.tsx             # Floating AI assistant window
+│   ├── NeriaResponse.tsx              # Enhanced AI response with batch animation
 │   ├── OnboardHero.tsx                # Onboarding interface
-│   └── YouTubeStats.tsx               # Channel statistics display
+│   ├── PromptBar.tsx                  # Interactive input with auto-resize
+│   ├── SplineBackground.tsx           # 3D animated background
+│   └── YouTubeStats.tsx               # Comprehensive analytics dashboard
 └── utils/
+    ├── googleAuth.ts                   # Enhanced Google OAuth with token refresh
+    ├── openai.ts                       # OpenAI integration for Neria AI
     └── supabase/
-        ├── client.ts                  # Browser client
-        ├── server.ts                  # Server client
-        └── admin.ts                   # Admin client
+        ├── client.ts                   # Browser client
+        ├── server.ts                   # Server client
+        └── admin.ts                    # Admin client
 ```
 
 ## Environment Variables Required
@@ -125,26 +171,50 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
   - `http://localhost:3001/youtube-callback`
 - **APIs Enabled**: YouTube Data API v3, YouTube Analytics API
 
-## Current User Flow
-1. User visits home page
+## Enhanced User Flow
+1. User visits home page with animated Neria introduction
 2. Clicks "Get Started" → redirects to sign-in page
 3. Signs in with Google (basic scopes) → redirects to dashboard
-4. Dashboard shows "Connect YouTube channel" button
-5. Click button → opens popup with YouTube OAuth (YouTube scopes)
-6. User selects YouTube account/channel → grants permissions
-7. Popup closes, dashboard refreshes with new channels in sidebar
-8. **Key**: Main session always preserved as original Google account
+4. Dashboard automatically redirects to last used channel or first channel
+5. **Dashboard Navigation**:
+   - Sidebar shows all connected channels with "Add Channel" button
+   - Main sections: Latest Video, Video Planner, Best/Worst Performing
+   - Secondary sections: My Goals, Thumbnail Content
+6. **Channel Connection**: Click "Add Channel" → popup YouTube OAuth → data collection page
+7. **Data Collection**: Automated YouTube API data fetching with real-time progress
+8. **Neria AI Integration**: Contextual AI responses based on channel analytics
+9. **Analytics Dashboard**: Real-time metrics, subscriber growth, performance insights
+10. **Key**: Session preservation + last channel tracking for seamless UX
 
 ## Next Steps / TODO
-- [ ] Implement detailed channel analytics display with charts
-- [ ] Add video-level analytics and performance metrics
-- [ ] Create channel comparison functionality
-- [ ] Add data export and reporting features
-- [ ] Implement user preferences and customization
-- [ ] Add real-time data updates and notifications
-- [ ] Create mobile-responsive dashboard layouts
-- [ ] Set up production environment variables and CI/CD
-- [ ] Deploy to production with monitoring
+### Analytics & Visualization
+- [ ] Add interactive charts and graphs to analytics dashboard
+- [ ] Implement video-level analytics with thumbnail analysis
+- [ ] Create channel comparison functionality across multiple channels
+- [ ] Add time-range selectors for analytics (7d, 30d, 90d, 1y)
+- [ ] Develop performance prediction models
+
+### Neria AI Enhancements
+- [ ] Implement video content strategy generation
+- [ ] Add thumbnail A/B testing recommendations
+- [ ] Create personalized growth plans based on channel metrics
+- [ ] Develop competitor analysis features
+- [ ] Add content calendar integration
+
+### Dashboard Features
+- [ ] Complete implementation of Best/Worst Performing pages
+- [ ] Add goal setting and progress tracking
+- [ ] Implement thumbnail content optimization tools
+- [ ] Create video upload scheduling recommendations
+- [ ] Add collaboration features for team channels
+
+### Technical Improvements
+- [ ] Add real-time data synchronization with WebSockets
+- [ ] Implement data caching and background refresh
+- [ ] Add mobile-responsive dashboard layouts
+- [ ] Create data export and reporting features
+- [ ] Set up production environment and monitoring
+- [ ] Implement comprehensive error tracking and logging
 
 ## Important Notes
 
@@ -154,11 +224,24 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - **Token Management**: YouTube access/refresh tokens are stored in `google_accounts` table and can be used for API calls
 - **Multi-Channel Support**: A single user can connect multiple YouTube channels (personal + Brand Accounts)
 
+### Dashboard & Navigation
+- **Sidebar Navigation**: Fixed 213px sidebar with dynamic channel routing and navigation states
+- **Channel Management**: Multi-channel support with last channel tracking and seamless switching
+- **Route Protection**: Automatic redirects based on authentication and channel availability
+- **Breadcrumb Navigation**: Clear navigation paths with active state indicators
+
 ### UI/UX Features
-- **Hydration Safety**: All components are designed to prevent React hydration mismatch errors
-- **Full-Height Layout**: Header (80px) and footer (51px) are fixed with content filling remaining space
-- **Responsive Design**: All components adapt to different screen sizes without scrollbars
-- **Animation System**: Character-by-character text animation with intelligent punctuation timing
+- **Hydration Safety**: All components designed to prevent React hydration mismatch errors
+- **Responsive Layout**: Sidebar + main content area with responsive breakpoints
+- **Enhanced Typography**: Improved font sizing and spacing across all components
+- **Animation System**: Character-by-character text animation with enhanced batch processing
+- **Interactive Elements**: Hover states, loading indicators, and micro-interactions throughout
+
+### Analytics Integration
+- **Real-Time Data**: Live YouTube Analytics API integration with automatic token refresh
+- **Performance Metrics**: Subscriber growth, view counts, engagement rates, watch time
+- **Date Range Analysis**: 90-day analytics with customizable time periods
+- **Channel Insights**: Account age calculation, publishing frequency, content performance
 
 ### Animation System
 - **Batch-Based Animation**: Text appears in 2-sentence chunks with 3-second pauses between batches
