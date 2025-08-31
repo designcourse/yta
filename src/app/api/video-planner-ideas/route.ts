@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
-import OpenAI from 'openai';
-
-function getOpenAI() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
-  return new OpenAI({ apiKey });
-}
+import { getClient, getCurrentModel } from "@/utils/openai";
 
 async function loadChannelContext(supabase: any, userId: string, channelId: string) {
   // Get channel metadata
@@ -168,11 +162,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Could not load channel context" }, { status: 404 });
     }
 
-    const openai = getOpenAI();
+    // Use OpenAI GPT-4o for video planning (reliable and creative)
+    const modelConfig = { provider: "openai", model: "gpt-4o" };
+    const client = getClient(modelConfig.provider);
     const prompt = buildVideoTitlePrompt(context);
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: prompt },
         { role: 'user', content: 'Generate the 6 video title ideas now.' }
@@ -266,7 +262,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Could not load channel context" }, { status: 404 });
     }
 
-    const openai = getOpenAI();
+    // Use OpenAI GPT-4o for video planning (reliable and creative)
+    const modelConfig = { provider: "openai", model: "gpt-4o" };
+    const client = getClient(modelConfig.provider);
     let prompt = buildVideoTitlePrompt(context);
     
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
@@ -275,8 +273,8 @@ export async function POST(request: Request) {
 Please generate titles that specifically address this request while still following all other requirements.`;
     }
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: prompt },
         { role: 'user', content: 'Generate the 6 video title ideas now.' }

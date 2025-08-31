@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { getValidAccessToken } from '@/utils/googleAuth';
-import OpenAI from 'openai';
-
-function getOpenAI() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
-  return new OpenAI({ apiKey });
-}
+import { getClient, getCurrentModel } from '@/utils/openai';
 
 export async function POST(request: Request) {
   try {
@@ -94,7 +88,9 @@ export async function POST(request: Request) {
     }
 
     // Generate strategy with OpenAI
-    const openai = getOpenAI();
+    // Use OpenAI GPT-4o for strategy generation (reliable and proven)
+    const modelConfig = { provider: "openai", model: "gpt-4o" };
+    const client = getClient(modelConfig.provider);
     const strategyPrompt = `You are Neria, a YouTube strategy coach. Based on the user's goals and channel analytics, create a concise strategy.
 
 Channel: ${channelRecord.title}
@@ -110,8 +106,8 @@ Analytics Summary: ${JSON.stringify(analyticsData).slice(0, 1000)}
 
 IMPORTANT: Write a SHORT strategy with EXACTLY 6 sentences or less. Cover the most important recommendations for content type, upload frequency, and one key improvement. Be concise and actionable. End with: "Do you agree with this plan?"`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: strategyPrompt },
         { role: 'user', content: 'Generate the strategy now.' }

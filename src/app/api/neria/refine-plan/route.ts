@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
-import OpenAI from 'openai';
-
-function getOpenAI() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
-  return new OpenAI({ apiKey });
-}
+import { getClient, getCurrentModel } from '@/utils/openai';
 
 export async function POST(request: Request) {
   try {
@@ -34,7 +28,8 @@ export async function POST(request: Request) {
     }
 
     // Generate refined plan
-    const openai = getOpenAI();
+    const modelConfig = await getCurrentModel();
+    const client = getClient(modelConfig.provider);
     const refinementPrompt = `You are Neria. The user has provided feedback on your strategy plan.
 
 Current Plan:
@@ -47,8 +42,8 @@ Based on their feedback, adjust the strategy and respond as Neria. Keep the same
 
 If they seem to fully agree, respond with exactly: "SUCCESS"`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: refinementPrompt },
         { role: 'user', content: 'Refine the plan based on the feedback.' }

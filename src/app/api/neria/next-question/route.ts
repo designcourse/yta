@@ -1,12 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
-import OpenAI from 'openai';
-
-function getOpenAI() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('Missing OPENAI_API_KEY');
-  return new OpenAI({ apiKey });
-}
+import { getClient, getCurrentModel } from '@/utils/openai';
 
 export async function POST(request: Request) {
   try {
@@ -76,9 +70,11 @@ export async function POST(request: Request) {
       requiredQuestions,
     };
 
-    const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    // Use a simple fallback since we're in onboarding - prioritize reliability over real-time data
+    const modelConfig = { provider: "openai", model: "gpt-4o" };
+    const client = getClient(modelConfig.provider);
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: instruction },
         { role: 'user', content: `Known answers (JSON):\n${JSON.stringify(context, null, 2)}` },

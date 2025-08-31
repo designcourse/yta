@@ -10,22 +10,24 @@ async function getCurrentModel(supabase: any) {
   
   if (!settings?.current_model_id) {
     return {
-      model: "gpt-4o-mini",
-      max_input_tokens: 128000,
-      max_output_tokens: 8000
+      provider: "perplexity",
+      model: "llama-3.1-sonar-large-128k-online",
+      max_input_tokens: 127072,
+      max_output_tokens: 8192
     };
   }
 
   const { data: modelProvider } = await supabase
     .from("model_providers")
-    .select("model, max_input_tokens, max_output_tokens")
+    .select("provider, model, max_input_tokens, max_output_tokens")
     .eq("id", settings.current_model_id)
     .single();
 
   return modelProvider || {
-    model: "gpt-4o-mini", 
-    max_input_tokens: 128000,
-    max_output_tokens: 8000
+    provider: "perplexity",
+    model: "llama-3.1-sonar-large-128k-online",
+    max_input_tokens: 127072,
+    max_output_tokens: 8192
   };
 }
 

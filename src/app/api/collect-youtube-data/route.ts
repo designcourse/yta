@@ -516,7 +516,7 @@ export async function POST(request: Request) {
           const openaiStartTime = Date.now();
 
           // Create a timeout promise for the OpenAI call
-          const openaiPromise = interpretYouTubeData({}, neriaPrompt);
+          const openaiPromise = interpretYouTubeData({}, neriaPrompt, 'openai', 'gpt-4o');
           const timeoutPromise = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('OpenAI API call timed out after 30 seconds')), 30000);
           });

@@ -1,21 +1,16 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
+import { getClient, getCurrentModel } from "@/utils/openai";
 
-function getOpenAI() {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
-  return new OpenAI({ apiKey });
-}
-
-async function analyzeUserIntent(message: string, currentUrl: string, channelId?: string): Promise<{
+async function analyzeUserIntent(message: string, currentUrl: string, channelId?: string, supabase?: any): Promise<{
   action: 'generate_video_titles' | 'navigate_to_planner' | 'navigate_to_goals' | 'navigate_to_analytics' | 'chat_only' | 'other';
   requiresRedirect: boolean;
   targetUrl?: string;
   reasoning?: string;
 }> {
-  const openai = getOpenAI();
+  const modelConfig = supabase ? await getCurrentModelWithSupabase(supabase) : { provider: "perplexity", model: "sonar-pro" };
+  const client = getClient(modelConfig.provider);
   
   const intentPrompt = `You are Neria, a YouTube strategy assistant. Analyze this user request and determine what action should be taken.
 
@@ -65,8 +60,8 @@ Respond ONLY with valid JSON in this exact format:
 }`;
 
   try {
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: intentPrompt },
         { role: 'user', content: 'Analyze the user request and respond with the action JSON.' }
@@ -104,31 +99,33 @@ Respond ONLY with valid JSON in this exact format:
   }
 }
 
-async function getCurrentModel(supabase: any) {
+async function getCurrentModelWithSupabase(supabase: any) {
   const { data: settings } = await supabase
     .from("model_settings")
     .select("current_model_id")
     .single();
   
   if (!settings?.current_model_id) {
-    // Fallback to default gpt-4o-mini
+    // Fallback to default perplexity
     return {
-      model: "gpt-4o-mini",
-      max_input_tokens: 128000,
-      max_output_tokens: 8000
+      provider: "perplexity",
+      model: "llama-3.1-sonar-large-128k-online",
+      max_input_tokens: 127072,
+      max_output_tokens: 8192
     };
   }
 
   const { data: modelProvider } = await supabase
     .from("model_providers")
-    .select("model, max_input_tokens, max_output_tokens")
+    .select("provider, model, max_input_tokens, max_output_tokens")
     .eq("id", settings.current_model_id)
     .single();
 
   return modelProvider || {
-    model: "gpt-4o-mini", 
-    max_input_tokens: 128000,
-    max_output_tokens: 8000
+    provider: "perplexity",
+    model: "llama-3.1-sonar-large-128k-online",
+    max_input_tokens: 127072,
+    max_output_tokens: 8192
   };
 }
 
@@ -399,7 +396,9 @@ async function generateVideoIdeas(supabase: any, userId: string, channelId: stri
       return false;
     }
 
-    const openai = getOpenAI();
+    // Use OpenAI GPT-4o for video idea generation (reliable and creative)
+    const modelConfig = { provider: "openai", model: "gpt-4o" };
+    const client = getClient(modelConfig.provider);
     let prompt = buildVideoTitlePrompt(context);
     
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
@@ -408,8 +407,8 @@ async function generateVideoIdeas(supabase: any, userId: string, channelId: stri
 Please generate titles that specifically address this request while still following all other requirements.`;
     }
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: prompt },
         { role: 'user', content: 'Generate the 6 video title ideas now.' }
@@ -588,9 +587,11 @@ Examples:
 - New frontend titles generated based on your recent performance trends. Video Planner updated!`;
 
   try {
-    const openai = getOpenAI();
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+    // Use OpenAI GPT-4o for summary generation 
+    const modelConfig = { provider: "openai", model: "gpt-4o" };
+    const client = getClient(modelConfig.provider);
+    const completion = await client.chat.completions.create({
+      model: modelConfig.model,
       messages: [
         { role: 'system', content: prompt },
         { role: 'user', content: 'Generate the contextual response now.' }
@@ -668,19 +669,134 @@ export async function POST(request: Request) {
       .from("chat_messages")
       .insert({ thread_id: threadId, user_id: user.id, role: "user", content: body.message });
 
-    // Get current model configuration
-    const modelConfig = await getCurrentModel(supabase);
-
-    // Load context
+    // Load context FIRST to check for video generation intent
     const pinned = await loadPinnedContext(supabase, user.id, threadId);
+    
+    // Analyze user intent immediately to see if this is a video generation request
+    if (pinned.channelId && pinned.channelMeta?.externalId) {
+      const intent = await analyzeUserIntent(
+        body.message, 
+        body.currentUrl || '', 
+        pinned.channelMeta.externalId,
+        supabase
+      );
+      
+      // If this is video generation, handle it immediately and return
+      if (intent.action === 'generate_video_titles') {
+        console.log('Video generation request detected - handling immediately');
+        
+        // Return streaming response with proper events for frontend
+        const stream = new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            
+            // Send starting message  
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+              type: 'video_ideas_generating',
+              message: 'Generating video ideas...'
+            })}\n\n`));
+            
+            // Generate contextual response and video ideas
+            try {
+              const contextualResponse = await generateContextualResponse(body.message, pinned);
+              
+              // Store the brief response in database
+              await supabase
+                .from("chat_messages")
+                .insert({ thread_id: threadId, role: "assistant", content: contextualResponse });
+              
+              // Send the brief contextual message to chat immediately
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'contextual_message', 
+                content: contextualResponse 
+              })}\n\n`));
+              
+              // Generate video ideas in background
+              const success = await generateVideoIdeas(supabase, user.id, pinned.channelMeta.externalId, body.message);
+              
+              if (success) {
+                // Send video generation complete event
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'video_ideas_generated',
+                  message: contextualResponse
+                })}\n\n`));
+                
+                // End stream
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                controller.close();
+              } else {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'error',
+                  message: 'Failed to generate video ideas. Please try again.'
+                })}\n\n`));
+                controller.close();
+              }
+            } catch (error) {
+              console.error('Error in video generation flow:', error);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'error',
+                message: 'Failed to generate video ideas. Please try again.'
+              })}\n\n`));
+              controller.close();
+            }
+          }
+        });
+        
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        });
+      }
+    }
+
+            // Get current model configuration
+        const modelConfig = await getCurrentModelWithSupabase(supabase);
     const systemPrompt = buildSystemPrompt(pinned);
     const history = await loadRecentMessages(supabase, threadId);
 
-    // Assemble messages
+    // Assemble messages with proper alternation for Perplexity
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
     messages.push({ role: "system", content: systemPrompt });
-    for (const m of history) messages.push({ role: m.role as any, content: m.content });
+    
+    // Filter history to ensure proper user/assistant alternation
+    const filteredHistory: Array<{ role: string; content: string }> = [];
+    let lastRole: string | null = null;
+    
+    for (const m of history) {
+      // Skip system messages in history
+      if (m.role === 'system') continue;
+      
+      if (m.role !== lastRole) {
+        filteredHistory.push(m);
+        lastRole = m.role;
+      } else {
+        // If same role as previous, concatenate content to avoid alternation issues
+        if (filteredHistory.length > 0) {
+          filteredHistory[filteredHistory.length - 1].content += "\n\n" + m.content;
+        }
+      }
+    }
+    
+    // Ensure proper alternation: conversation should start with user message
+    if (filteredHistory.length > 0 && filteredHistory[0].role === 'assistant') {
+      // Remove the first assistant message if conversation starts with it
+      filteredHistory.shift();
+    }
+    
+    // Ensure conversation doesn't end with user message before adding new user message
+    if (filteredHistory.length > 0 && filteredHistory[filteredHistory.length - 1].role === 'user') {
+      // Remove the last user message to avoid two consecutive user messages
+      filteredHistory.pop();
+    }
+    
+    for (const m of filteredHistory) messages.push({ role: m.role as any, content: m.content });
     messages.push({ role: "user", content: body.message });
+    
+    // Debug log the final message structure
+    console.log('Final messages structure:', messages.map(m => ({ role: m.role, contentLength: m.content.length })));
 
     // Calculate context usage
     const inputTokens = countTokens(messages, modelConfig.model);
@@ -690,8 +806,8 @@ export async function POST(request: Request) {
 
 
     // Call model with streaming
-    const openai = getOpenAI();
-    const stream = await openai.chat.completions.create({
+    const client = getClient(modelConfig.provider);
+    const stream = await client.chat.completions.create({
       model: modelConfig.model,
       messages,
       temperature: 0.4,
@@ -735,7 +851,8 @@ export async function POST(request: Request) {
           const intent = await analyzeUserIntent(
             body.message, 
             body.currentUrl || '', 
-            pinned.channelMeta?.externalId
+            pinned.channelMeta?.externalId,
+            supabase
           );
           
           console.log('AI Intent Analysis:', {
@@ -746,74 +863,8 @@ export async function POST(request: Request) {
             hasExternalId: !!pinned.channelMeta?.externalId
           });
           
-          // Handle the determined intent
-          if (intent.action === 'generate_video_titles' && pinned.channelId && pinned.channelMeta?.externalId) {
-            try {
-              const currentUrl = body.currentUrl || '';
-              const isOnPlannerPage = currentUrl.includes('/planner');
-              
-              if (!isOnPlannerPage && intent.requiresRedirect) {
-                // Send redirect event first
-                console.log('AI determined redirect needed to:', intent.targetUrl);
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                  type: 'redirect_to_planner',
-                  channelId: pinned.channelMeta.externalId,
-                  message: 'Taking you to the Video Planner to see your new titles...'
-                })}\n\n`));
-                
-                // Add a small delay to ensure redirect happens before other events
-                await new Promise(resolve => setTimeout(resolve, 100));
-              } else {
-                console.log('User already on planner page or no redirect needed');
-              }
-              
-              // Dispatch event that video generation has started
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'video_ideas_generating',
-                message: 'Starting to generate video ideas...'
-              })}\n\n`));
-              
-              // Generate video title ideas directly without HTTP call
-              const videoIdeasGenerated = await generateVideoIdeas(supabase, user.id, pinned.channelMeta.externalId, body.message);
-              
-              if (videoIdeasGenerated) {
-                // Generate contextual response based on the request and channel data
-                console.log('Generating contextual response for request:', body.message);
-                const contextualResponse = await generateContextualResponse(body.message, pinned);
-                console.log('Generated contextual response:', contextualResponse);
-                
-                // Always store the contextual response as a new assistant message
-                const { error: insertError } = await supabase
-                  .from("chat_messages")
-                  .insert({ thread_id: threadId, role: "assistant", content: contextualResponse });
-                
-                if (insertError) {
-                  console.error('Error inserting contextual response:', insertError);
-                } else {
-                  console.log('Successfully inserted contextual response to database');
-                }
-                
-                // Add a small delay to ensure database write is committed
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-                // Only send the contextual message event if user stays on same page
-                if (isOnPlannerPage) {
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                    type: 'contextual_message',
-                    content: contextualResponse
-                  })}\n\n`));
-                }
-                
-                // Send notification that video ideas were generated
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                  type: 'video_ideas_generated',
-                  message: contextualResponse
-                })}\n\n`));
-              }
-            } catch (error) {
-              console.error('Error generating video ideas from chat:', error);
-            }
-          } else if (intent.requiresRedirect && intent.targetUrl && pinned.channelMeta?.externalId) {
+          // Handle other navigation intents
+          if (intent.requiresRedirect && intent.targetUrl && pinned.channelMeta?.externalId) {
             // Handle other navigation intents
             try {
               console.log('AI determined navigation needed:', intent);
@@ -848,7 +899,7 @@ export async function POST(request: Request) {
             try {
               const summaryPrompt = "Summarize the conversation so far into a compact brief focusing on user goals, decisions, action items, and unresolved questions. Keep under 200 words.";
               const summaryMsgs = [{ role: "system" as const, content: summaryPrompt }, ...history.slice(-20)];
-              const sum = await openai.chat.completions.create({ model: "gpt-4o-mini", messages: summaryMsgs as any, max_tokens: 300, temperature: 0 });
+              const sum = await client.chat.completions.create({ model: modelConfig.model, messages: summaryMsgs as any, max_tokens: 300, temperature: 0 });
               const summaryText = sum.choices?.[0]?.message?.content || null;
               if (summaryText) {
                 await supabase
