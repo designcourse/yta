@@ -78,6 +78,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **24-Hour Caching**: Intelligent caching system to avoid unnecessary AI generation while maintaining freshness
 - **Generate More Functionality**: One-click refresh for new title ideas with loading states
 - **Neria Chat Integration**: Custom title generation via chat commands with real-time updates
+- **Smart Redirect System**: Automatically redirects users to Video Planner when requesting titles from other pages
 - **Context-Aware Prompts**: Incorporates user memory profiles, channel strategy, and latest video performance
 - **Consistent Card Heights**: Fixed layout issues for varying title lengths with proper spacing
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
+import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 
 function getOpenAI() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -74,6 +75,7 @@ type ChatPostBody = {
   threadId?: string;
   channelId?: string; // YouTube channel id (external) or internal UUID; we resolve below
   message: string;
+  currentUrl?: string; // Current page URL to check if redirect is needed
 };
 
 async function getOrCreateThread(supabase: any, userId: string, channelId?: string) {
@@ -300,7 +302,7 @@ function buildSystemPrompt(context: {
     "Always ground recommendations in the user's goals, constraints, the specific channel context, and latest stats.",
     channelLine,
     "When you make a suggestion, briefly explain why it matters and the expected impact.",
-    "If a user asks you to generate video titles or video ideas, tell them that you'll generate personalized title ideas for them and they can find them in the Video Planner section.",
+    "If a user asks you to generate video titles or video ideas, respond with a brief acknowledgment like 'Working on that for you...' or 'Let me generate some ideas...' If they're not already on the planner page, mention you're taking them there. Do NOT give long explanations.",
     profile,
     stats,
     about,
@@ -309,6 +311,242 @@ function buildSystemPrompt(context: {
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+async function generateVideoIdeas(supabase: any, userId: string, channelId: string, customPrompt?: string): Promise<boolean> {
+  try {
+    // Get the internal channel UUID from the channels table
+    const { data: channelData, error: channelError } = await supabase
+      .from("channels")
+      .select("id")
+      .eq("channel_id", channelId)
+      .eq("user_id", userId)
+      .single();
+
+    if (channelError || !channelData) {
+      console.error("Channel not found for video ideas generation:", channelError);
+      return false;
+    }
+
+    const internalChannelId = channelData.id;
+
+    // Load channel context (copied from video-planner-ideas route)
+    const context = await loadChannelContextForVideos(supabase, userId, channelId);
+    if (!context) {
+      console.error("Could not load channel context for video ideas");
+      return false;
+    }
+
+    const openai = getOpenAI();
+    let prompt = buildVideoTitlePrompt(context);
+    
+    // If custom prompt is provided, modify the prompt to incorporate user's specific request
+    if (customPrompt) {
+      prompt += `\n\nUSER'S SPECIFIC REQUEST: "${customPrompt}"
+Please generate titles that specifically address this request while still following all other requirements.`;
+    }
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: 'Generate the 6 video title ideas now.' }
+      ],
+      max_tokens: 500,
+      temperature: 0.8,
+    });
+
+    const response = completion.choices?.[0]?.message?.content || '[]';
+    
+    let titleIdeas: string[] = [];
+    try {
+      titleIdeas = JSON.parse(response);
+      if (!Array.isArray(titleIdeas) || titleIdeas.length !== 6) {
+        throw new Error('Invalid response format');
+      }
+    } catch (error) {
+      console.error('Error parsing AI response for video ideas:', error);
+      return false;
+    }
+
+    // Delete old ideas for this channel first
+    const admin = createSupabaseAdminClient();
+    await admin
+      .from("video_planner_ideas")
+      .delete()
+      .eq("channel_id", internalChannelId)
+      .eq("user_id", userId);
+
+    // Store new ideas in database
+    const ideasData = titleIdeas.map((title, index) => ({
+      channel_id: internalChannelId,
+      user_id: userId,
+      title,
+      position: index + 1,
+      created_at: new Date().toISOString()
+    }));
+
+    const { error: saveError } = await admin
+      .from("video_planner_ideas")
+      .insert(ideasData);
+
+    if (saveError) {
+      console.error("Error saving video ideas:", saveError);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error generating video ideas:", error);
+    return false;
+  }
+}
+
+async function loadChannelContextForVideos(supabase: any, userId: string, channelId: string) {
+  // Get channel metadata
+  const { data: channelMeta } = await supabase
+    .from("channels")
+    .select("id, title, channel_id")
+    .eq("channel_id", channelId)
+    .eq("user_id", userId)
+    .single();
+
+  if (!channelMeta) return null;
+
+  // Get user's memory profile
+  const { data: memoryProfile } = await supabase
+    .from("memory_profile")
+    .select("goals, preferences, constraints")
+    .eq("user_id", userId)
+    .eq("channel_id", channelMeta.id)
+    .maybeSingle();
+
+  // Get latest video info
+  const { data: latestVideo } = await supabase
+    .from("latest_video_snapshots")
+    .select("video_title, view_count, comment_count, published_at")
+    .eq("channel_id", channelMeta.id)
+    .eq("user_id", userId)
+    .limit(1)
+    .single();
+
+  // Get channel context (about, recent titles)
+  const { data: ctxRows } = await supabase
+    .from("neria_context")
+    .select("prompt_type, prompt_text")
+    .eq("channel_id", channelMeta.id);
+
+  const aboutText = (ctxRows || []).find((r: any) => r.prompt_type === "channel_about")?.prompt_text || "";
+  let recentTitles: string[] = [];
+  try {
+    const raw = (ctxRows || []).find((r: any) => r.prompt_type === "recent_video_titles")?.prompt_text;
+    if (raw) recentTitles = JSON.parse(raw);
+  } catch {}
+
+  // Get current strategy plan
+  const { data: strategy } = await supabase
+    .from("channel_strategy")
+    .select("plan_text")
+    .eq("user_id", userId)
+    .eq("channel_id", channelMeta.id)
+    .maybeSingle();
+
+  return {
+    channelMeta,
+    memoryProfile,
+    latestVideo,
+    aboutText,
+    recentTitles,
+    strategyPlan: strategy?.plan_text || null
+  };
+}
+
+function buildVideoTitlePrompt(context: any): string {
+  const { channelMeta, memoryProfile, latestVideo, aboutText, recentTitles, strategyPlan } = context;
+
+  return `You are Neria, a YouTube strategy coach. Generate 6 compelling YouTube video title ideas for the channel "${channelMeta.title}".
+
+CHANNEL CONTEXT:
+- Channel: ${channelMeta.title}
+- About: ${aboutText || 'Not provided'}
+- Recent Video Titles: ${recentTitles.slice(0, 5).join(', ') || 'None available'}
+
+${latestVideo ? `LATEST VIDEO PERFORMANCE:
+- Title: ${latestVideo.video_title}
+- Views: ${latestVideo.view_count?.toLocaleString() || 'N/A'}
+- Comments: ${latestVideo.comment_count?.toLocaleString() || 'N/A'}
+- Published: ${latestVideo.published_at}
+` : ''}
+
+${memoryProfile ? `USER GOALS & PREFERENCES:
+- Goals: ${memoryProfile.goals || 'Not specified'}
+- Preferences: ${memoryProfile.preferences || 'Not specified'}
+- Constraints: ${memoryProfile.constraints || 'Not specified'}
+` : ''}
+
+${strategyPlan ? `CURRENT STRATEGY:
+${strategyPlan}
+` : ''}
+
+REQUIREMENTS:
+1. Generate exactly 6 video title ideas
+2. Make titles compelling, clickable, and aligned with the channel's content
+3. Consider current trends and high-performing patterns
+4. Ensure titles are optimized for YouTube search and discovery
+5. Make each title unique and appealing to the target audience
+6. Keep titles between 40-60 characters for optimal display
+
+Return ONLY a JSON array of 6 title strings, no additional text or formatting:
+["Title 1", "Title 2", "Title 3", "Title 4", "Title 5", "Title 6"]`;
+}
+
+async function generateContextualResponse(userRequest: string, pinnedContext: any): Promise<string> {
+  const { channelMeta, memoryProfile, aboutText, recentTitles, statsSummary, strategyPlan } = pinnedContext;
+  
+  const prompt = `You are Neria, a concise YouTube strategy coach. A user just asked you to generate video titles with this request: "${userRequest}"
+
+CHANNEL CONTEXT:
+- Channel: ${channelMeta?.title || 'Unknown'}
+- About: ${aboutText || 'Not provided'}
+- Recent titles: ${recentTitles?.slice(0, 3).join(', ') || 'None'}
+- Goals: ${memoryProfile?.goals || 'Not specified'}
+- Latest stats: ${statsSummary || 'Not available'}
+
+Respond with a SHORT (1-2 sentences max) contextual message about the video titles you just generated. Consider:
+- If the request aligns well with their channel, be encouraging
+- If it's off-topic, gently warn but stay supportive
+- Reference their goals/performance when relevant
+- Keep it conversational and brief
+- Always mention they can find the titles in the Video Planner
+- Do NOT wrap your response in quotes or any other punctuation marks
+
+Examples:
+- Generated 6 UI design titles perfect for your audience! Check the Video Planner.
+- Created titles for cooking content - these might be outside your usual design niche, but could attract new viewers. Video Planner has them ready.
+- New frontend titles generated based on your recent performance trends. Video Planner updated!`;
+
+  try {
+    const openai = getOpenAI();
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: prompt },
+        { role: 'user', content: 'Generate the contextual response now.' }
+      ],
+      max_tokens: 100,
+      temperature: 0.7,
+    });
+
+    let response = completion.choices?.[0]?.message?.content || "I've generated new video title ideas for you. Check the Video Planner!";
+    
+    // Remove any surrounding quotes
+    response = response.replace(/^["']|["']$/g, '');
+    
+    return response;
+  } catch (error) {
+    console.error('Error generating contextual response:', error);
+    return "New video titles generated! Check the Video Planner to see them.";
+  }
 }
 
 export async function POST(request: Request) {
@@ -396,23 +634,62 @@ export async function POST(request: Request) {
 
           // Check if the user's message is asking for video title generation
           const isVideoTitleRequest = checkForVideoTitleRequest(body.message);
-          if (isVideoTitleRequest && pinned.channelId) {
+          if (isVideoTitleRequest && pinned.channelId && pinned.channelMeta?.externalId) {
             try {
-              // Generate video title ideas based on the custom prompt
-              const titleResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/video-planner-ideas`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  channelId: pinned.channelMeta?.externalId, 
-                  customPrompt: body.message 
-                })
-              });
+              // Check if user needs to be redirected to planner page
+              const currentUrl = body.currentUrl || '';
+              const isOnPlannerPage = currentUrl.includes('/planner');
               
-              if (titleResponse.ok) {
+              if (!isOnPlannerPage) {
+                // Send redirect event first
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                  type: 'redirect_to_planner',
+                  channelId: pinned.channelMeta.externalId,
+                  message: 'Taking you to the Video Planner to see your new titles...'
+                })}\n\n`));
+              }
+              
+              // Dispatch event that video generation has started
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'video_ideas_generating',
+                message: 'Starting to generate video ideas...'
+              })}\n\n`));
+              
+              // Generate video title ideas directly without HTTP call
+              const videoIdeasGenerated = await generateVideoIdeas(supabase, user.id, pinned.channelMeta.externalId, body.message);
+              
+              if (videoIdeasGenerated) {
+                // Generate contextual response based on the request and channel data
+                console.log('Generating contextual response for request:', body.message);
+                const contextualResponse = await generateContextualResponse(body.message, pinned);
+                console.log('Generated contextual response:', contextualResponse);
+                
+                // Always store the contextual response as a new assistant message
+                const { error: insertError } = await supabase
+                  .from("chat_messages")
+                  .insert({ thread_id: threadId, role: "assistant", content: contextualResponse });
+                
+                if (insertError) {
+                  console.error('Error inserting contextual response:', insertError);
+                } else {
+                  console.log('Successfully inserted contextual response to database');
+                }
+                
+                // Add a small delay to ensure database write is committed
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Only send the contextual message event if user stays on same page
+                if (isOnPlannerPage) {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                    type: 'contextual_message',
+                    content: contextualResponse
+                  })}\n\n`));
+                }
+                
                 // Send notification that video ideas were generated
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                   type: 'video_ideas_generated',
-                  message: 'I\'ve generated new video title ideas based on your request. Check the Video Planner page to see them!'
+                  message: contextualResponse
                 })}\n\n`));
               }
             } catch (error) {

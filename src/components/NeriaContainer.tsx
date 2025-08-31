@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useNeria } from './NeriaContext';
 import ContextIndicator from './ContextIndicator';
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
   const { isFullscreen, setIsFullscreen, currentChannelId } = useNeria();
+  const router = useRouter();
   
   // Position and size state for when in fullscreen/absolute mode
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -26,6 +28,24 @@ const NeriaContainer: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [contextPercentage, setContextPercentage] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Function to refresh messages
+  const refreshMessages = useCallback(async () => {
+    if (!threadId) return;
+    try {
+      const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(threadId)}`);
+      if (mRes.ok) {
+        const m = await mRes.json();
+        setMessages(m.messages || []);
+        if (m.contextPercentage !== undefined) {
+          setContextPercentage(m.contextPercentage);
+        }
+        console.log('Messages refreshed, total messages:', m.messages?.length || 0);
+      }
+    } catch (error) {
+      console.error('Error refreshing messages:', error);
+    }
+  }, [threadId]);
 
   const loadThreadAndMessages = useCallback(async () => {
     if (!currentChannelId) return;
@@ -80,6 +100,19 @@ const NeriaContainer: React.FC = () => {
     loadThreadAndMessages();
   }, [loadThreadAndMessages]);
 
+  // Listen for refresh messages event from planner redirect
+  useEffect(() => {
+    const handleRefreshMessages = () => {
+      console.log('Received refresh-neria-messages event');
+      refreshMessages();
+    };
+
+    window.addEventListener('refresh-neria-messages', handleRefreshMessages);
+    return () => {
+      window.removeEventListener('refresh-neria-messages', handleRefreshMessages);
+    };
+  }, [refreshMessages]);
+
   // Persist last thread in localStorage per channel so we can restore quickly on refresh
   useEffect(() => {
     if (threadId && currentChannelId) {
@@ -117,7 +150,12 @@ const NeriaContainer: React.FC = () => {
       const res = await fetch('/api/neria/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelId: currentChannelId, threadId, message: value })
+        body: JSON.stringify({ 
+          channelId: currentChannelId, 
+          threadId, 
+          message: value,
+          currentUrl: window.location.pathname
+        })
       });
       
       if (!res.ok) {
@@ -167,8 +205,30 @@ const NeriaContainer: React.FC = () => {
                 } else if (data.type === 'done') {
                   // Streaming complete
                   break;
+                } else if (data.type === 'redirect_to_planner') {
+                  // Redirect to planner page with loading state
+                  console.log('Redirecting to planner page:', data.message);
+                  if (data.channelId) {
+                    // Add URL parameter to indicate video generation is in progress
+                    router.push(`/dashboard/${data.channelId}/planner?generating=chat`);
+                  }
+                } else if (data.type === 'video_ideas_generating') {
+                  // Video ideas generation started, dispatch a custom event
+                  console.log('Dispatching video-ideas-generating event:', data.message);
+                  const event = new CustomEvent('video-ideas-generating', { 
+                    detail: { message: data.message }
+                  });
+                  window.dispatchEvent(event);
+                } else if (data.type === 'contextual_message') {
+                  // Add the contextual message as a new assistant message
+                  const assistantId = `asst-contextual-${Date.now()}`;
+                  setMessages((prev) => [
+                    ...prev,
+                    { id: assistantId, role: 'assistant', content: data.content, created_at: new Date().toISOString() },
+                  ]);
                 } else if (data.type === 'video_ideas_generated') {
                   // Video ideas were generated, dispatch a custom event
+                  console.log('Dispatching video-ideas-generated event:', data.message);
                   const event = new CustomEvent('video-ideas-generated', { 
                     detail: { message: data.message }
                   });
@@ -437,14 +497,14 @@ const NeriaContainer: React.FC = () => {
                   <div key={m.id}>
                     {m.role === 'user' ? (
                       <div 
-                        className="px-4 py-3 text-white text-sm leading-relaxed ml-auto max-w-[85%]"
+                        className="px-4 py-3 text-white text-base leading-relaxed ml-auto max-w-[85%]"
                         style={{ backgroundColor: '#3086ff', borderRadius: '12px' }}
                       >
                         {m.content}
                       </div>
                     ) : (
                       <div className="text-white space-y-4 max-w-[85%]">
-                        <p className="text-sm leading-relaxed opacity-90 whitespace-pre-wrap">{m.content}</p>
+                        <p className="text-base leading-relaxed opacity-90 whitespace-pre-wrap">{m.content}</p>
                       </div>
                     )}
                   </div>
