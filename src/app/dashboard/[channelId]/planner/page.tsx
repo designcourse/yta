@@ -281,86 +281,73 @@ export default function PlannerPage({
           </div>
         )}
 
-        {/* Loading State */}
-        {isLoading && videoIdeas.length === 0 && (
-          <div className="flex items-center justify-center py-12">
-            <div className="flex items-center gap-3">
-              <svg className="w-6 h-6 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
-                <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-              <span className="text-gray-600">Generating video title ideas...</span>
+        {/* Video Ideas Cards or Loading State */}
+        <div className="relative">
+          {/* Show loading overlay when generating, regardless of whether videos exist */}
+          {(generating || isGeneratingFromChat || (isLoading && videoIdeas.length === 0)) && (
+            <div className="absolute inset-0 flex items-center justify-center z-10">
+              <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
             </div>
-          </div>
-        )}
+          )}
+          
+          {/* Video Ideas Grid - show even when empty to maintain consistent layout */}
+          <div 
+            className={`grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-6 transition-opacity duration-500 ${
+              fadeOut ? 'opacity-30' : 'opacity-100'
+            }`}
+            style={{ 
+              opacity: (generating || isGeneratingFromChat || (isLoading && videoIdeas.length === 0)) ? 0.3 : fadeOut ? 0.3 : 1,
+              minHeight: videoIdeas.length === 0 ? '400px' : 'auto'
+            }}
+          >
+            {videoIdeas.map((idea) => (
+              <button
+                key={idea.id}
+                onClick={() => handleCardClick(idea.id)}
+                className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 text-left"
+                style={{ minWidth: '300px' }}
+                disabled={generating || isGeneratingFromChat}
+              >
+                {/* Thumbnail Image */}
+                <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
+                  <span className="text-gray-500">Thumbnail Preview</span>
+                </div>
 
-        {/* Video Ideas Cards */}
-        {videoIdeas.length > 0 && (
-          <div className="relative">
-            {/* Loading Overlay */}
-            {(generating || isGeneratingFromChat) && (
-              <div className="absolute inset-0 flex items-center justify-center z-10">
-                <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-              </div>
-            )}
-            
-            <div 
-              className={`grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-6 transition-opacity duration-500 ${
-                fadeOut ? 'opacity-30' : 'opacity-100'
-              }`}
-              style={{ 
-                opacity: (generating || isGeneratingFromChat) ? 0.3 : fadeOut ? 0.3 : 1 
-              }}
-            >
-              {videoIdeas.map((idea) => (
-                <button
-                  key={idea.id}
-                  onClick={() => handleCardClick(idea.id)}
-                  className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 text-left"
-                  style={{ minWidth: '300px' }}
-                  disabled={generating || isGeneratingFromChat}
-                >
-                  {/* Thumbnail Image */}
-                  <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
-                    <span className="text-gray-500">Thumbnail Preview</span>
-                  </div>
-
-                  {/* Card Content */}
-                  <div className="p-4 flex items gap-4">
-                    {/* Channel Avatar */}
-                    <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
-                      {getChannelAvatar() ? (
-                        <img 
-                          src={getChannelAvatar()!} 
-                          alt={`${channelData?.title} avatar`}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gray-300 flex items-center justify-center">
-                          <span className="text-white font-medium text-sm">
-                            {channelData?.title?.charAt(0) || '?'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    {/* Info Container */}
-                    <div className="flex-1">
-                      <h3 className="text-base font-bold text-gray-900 mb-1 leading-tight min-h-[2.5rem] flex items-start">
-                        <span className="line-clamp-2">
-                          {idea.title}
+                {/* Card Content */}
+                <div className="p-4 flex items gap-4">
+                  {/* Channel Avatar */}
+                  <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
+                    {getChannelAvatar() ? (
+                      <img 
+                        src={getChannelAvatar()!} 
+                        alt={`${channelData?.title} avatar`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-300 flex items-center justify-center">
+                        <span className="text-white font-medium text-sm">
+                          {channelData?.title?.charAt(0) || '?'}
                         </span>
-                      </h3>
-                      <p className="text-base text-gray-600">
-                        {channelData?.title || 'DesignCourse'}
-                      </p>
-                    </div>
+                      </div>
+                    )}
                   </div>
-                </button>
-              ))}
-            </div>
+                  
+                  {/* Info Container */}
+                  <div className="flex-1">
+                    <h3 className="text-base font-bold text-gray-900 mb-1 leading-tight min-h-[2.5rem] flex items-start">
+                      <span className="line-clamp-2">
+                        {idea.title}
+                      </span>
+                    </h3>
+                    <p className="text-base text-gray-600">
+                      {channelData?.title || 'DesignCourse'}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
-        )}
+        </div>
 
         {/* Empty State */}
         {!isLoading && videoIdeas.length === 0 && !error && !(generating || isGeneratingFromChat) && (
@@ -381,16 +368,6 @@ export default function PlannerPage({
               </svg>
               {(generating || isGeneratingFromChat) ? 'Generating...' : 'Generate Ideas'}
             </button>
-          </div>
-        )}
-        
-        {/* Generating State for Empty */}
-        {(generating || isGeneratingFromChat) && videoIdeas.length === 0 && (
-          <div className="flex items-center justify-center py-12">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-              <span className="text-gray-600">Generating video title ideas...</span>
-            </div>
           </div>
         )}
       </div>
