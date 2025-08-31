@@ -34,11 +34,7 @@ export default function CollectionHero({ neriaResponse, onNeriaComplete, onExitC
               isStrategy={isStrategy} 
             />
           </div>
-        ) : (
-          <div className="w-full mb-8 p-4 bg-yellow-50 border border-yellow-200 rounded">
-            <p className="text-yellow-800">🔍 Debug: Waiting for Neria response...</p>
-          </div>
-        )}
+        ) : null}
       </div>
 
       {/* Removed collecting status indicator */}

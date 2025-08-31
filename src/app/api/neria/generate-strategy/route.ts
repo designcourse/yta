@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 
     // Generate strategy with OpenAI
     const openai = getOpenAI();
-    const strategyPrompt = `You are Neria, a YouTube strategy coach. Based on the user's goals and channel analytics, create a comprehensive strategy.
+    const strategyPrompt = `You are Neria, a YouTube strategy coach. Based on the user's goals and channel analytics, create a concise strategy.
 
 Channel: ${channelRecord.title}
 Stats: ${channelRecord.subscriber_count?.toLocaleString()} subscribers, ${channelRecord.video_count} videos, ${channelRecord.view_count?.toLocaleString()} views
@@ -108,13 +108,7 @@ ${(answers || []).map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n')}
 
 Analytics Summary: ${JSON.stringify(analyticsData).slice(0, 1000)}
 
-Create a strategy covering:
-1. Content types that work well
-2. Recommended video length
-3. Industry trends for their niche
-4. Upload frequency
-
-Write as Neria in 3-4 sentences per paragraph, slightly smaller font. Be encouraging but realistic. End with: "Do you agree with this plan? Is there anything you'd like to change?"`;
+IMPORTANT: Write a SHORT strategy with EXACTLY 6 sentences or less. Cover the most important recommendations for content type, upload frequency, and one key improvement. Be concise and actionable. End with: "Do you agree with this plan?"`;
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -122,7 +116,7 @@ Write as Neria in 3-4 sentences per paragraph, slightly smaller font. Be encoura
         { role: 'system', content: strategyPrompt },
         { role: 'user', content: 'Generate the strategy now.' }
       ],
-      max_tokens: 1500,
+      max_tokens: 300,
       temperature: 0.7,
     });
 

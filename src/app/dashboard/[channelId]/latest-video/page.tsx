@@ -24,6 +24,7 @@ export default function LatestVideoPage({ params }: LatestVideoPageProps) {
   const [videoData, setVideoData] = useState<VideoData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showContainer, setShowContainer] = useState(false);
 
   useEffect(() => {
     params.then(resolvedParams => {
@@ -66,6 +67,8 @@ export default function LatestVideoPage({ params }: LatestVideoPageProps) {
 
       const data = await response.json();
       setVideoData(data.video);
+      // Show container with animation after data is loaded
+      setTimeout(() => setShowContainer(true), 50);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       console.error('Error fetching latest video:', err);
@@ -75,6 +78,7 @@ export default function LatestVideoPage({ params }: LatestVideoPageProps) {
   };
 
   const handleRefresh = () => {
+    setShowContainer(false);
     fetchLatestVideo(true);
   };
 
@@ -100,7 +104,17 @@ export default function LatestVideoPage({ params }: LatestVideoPageProps) {
           </div>
         )}
         
-        <LastVideoContainer videoData={videoData || undefined} />
+        {videoData && (
+          <div 
+            className={`transition-all duration-700 ease-out ${
+              showContainer 
+                ? 'opacity-100 translate-y-0' 
+                : 'opacity-0 translate-y-12'
+            }`}
+          >
+            <LastVideoContainer videoData={videoData} />
+          </div>
+        )}
       </div>
     </ClientDashboardLayout>
   );

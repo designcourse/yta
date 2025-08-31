@@ -185,6 +185,36 @@ export default function CollectionPage() {
     setIsTransitioning(false);
   };
 
+  const redirectToLatestVideo = async () => {
+    if (!channelId) return;
+    
+    try {
+      // Fetch the latest video URL for this channel
+      const response = await fetch(`/api/latest-video?channelId=${channelId}`);
+      if (!response.ok) {
+        console.error('Failed to fetch latest video');
+        // Fallback to dashboard if we can't get the video
+        router.push('/dashboard');
+        return;
+      }
+      
+      const data = await response.json();
+      const videoId = data.video?.video_id;
+      
+      if (videoId) {
+        // Redirect to the latest video page
+        router.push(`/dashboard/${channelId}/latest-video`);
+      } else {
+        // Fallback to dashboard if no video ID
+        router.push('/dashboard');
+      }
+    } catch (error) {
+      console.error('Error redirecting to latest video:', error);
+      // Fallback to dashboard on error
+      router.push('/dashboard');
+    }
+  };
+
   const handleSendAnswer = async () => {
     if (!answerText.trim()) return;
     setSending(true);
@@ -233,9 +263,10 @@ export default function CollectionPage() {
         
         if (data.status === 'complete') {
           setDisplayMode('complete');
-          setNeriaResponse('Success');
           setShowPrompt(false);
           setIsTransitioning(false);
+          // Redirect to latest video instead of showing "Success"
+          await redirectToLatestVideo();
         } else if (data.status === 'continue') {
           setCurrentStrategy(data.refinedPlan);
           setNeriaResponse(data.refinedPlan);
