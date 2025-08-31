@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNeria } from './NeriaContext';
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
-  const { isFullscreen, setIsFullscreen } = useNeria();
+  const { isFullscreen, setIsFullscreen, currentChannelId } = useNeria();
   
   // Position and size state for when in fullscreen/absolute mode
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -18,6 +18,111 @@ const NeriaContainer: React.FC = () => {
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
   
   const containerRef = useRef<HTMLDivElement>(null);
+  const [threadId, setThreadId] = useState<string | undefined>(undefined);
+  const [messages, setMessages] = useState<Array<{ id: string; role: string; content: string; created_at: string }>>([]);
+  const [initialLoading, setInitialLoading] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const loadThreadAndMessages = useCallback(async () => {
+    if (!currentChannelId) return;
+    try {
+      setInitialLoading(true);
+      // Try restore from localStorage first
+      try {
+        const restored = localStorage.getItem(`neria:lastThread:${currentChannelId}`);
+        if (restored) {
+          setThreadId(restored);
+          const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(restored)}`);
+          if (mRes.ok) {
+            const m = await mRes.json();
+            setMessages(m.messages || []);
+            setInitialLoading(false);
+            return;
+          }
+        }
+      } catch {}
+      const tRes = await fetch(`/api/neria/threads?channelId=${encodeURIComponent(currentChannelId)}`);
+      if (tRes.ok) {
+        const data = await tRes.json();
+        const first = (data.threads || [])[0];
+        if (first?.id) {
+          setThreadId(first.id);
+          const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(first.id)}`);
+          if (mRes.ok) {
+            const m = await mRes.json();
+            setMessages(m.messages || []);
+          } else {
+            setMessages([]);
+          }
+        } else {
+          setThreadId(undefined);
+          setMessages([]);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setInitialLoading(false);
+    }
+  }, [currentChannelId]);
+
+  useEffect(() => {
+    loadThreadAndMessages();
+  }, [loadThreadAndMessages]);
+
+  // Persist last thread in localStorage per channel so we can restore quickly on refresh
+  useEffect(() => {
+    if (threadId && currentChannelId) {
+      try {
+        localStorage.setItem(`neria:lastThread:${currentChannelId}`, threadId);
+      } catch {}
+    }
+  }, [threadId, currentChannelId]);
+
+  const sendMessage = useCallback(async () => {
+    const value = inputValue.trim();
+    if (!value) return;
+    // Optimistically add user message
+    const tempId = `temp-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      { id: tempId, role: 'user', content: value, created_at: new Date().toISOString() },
+    ]);
+    setInputValue("");
+    try {
+      setSending(true);
+      const res = await fetch('/api/neria/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId: currentChannelId, threadId, message: value })
+      });
+      if (!res.ok) {
+        console.error('Chat failed');
+        return;
+      }
+      const data = await res.json();
+      if (data?.threadId && !threadId) setThreadId(data.threadId);
+      const reply: string = data?.reply || '';
+      if (reply) {
+        setMessages((prev) => [
+          ...prev,
+          { id: `asst-${Date.now()}`, role: 'assistant', content: reply, created_at: new Date().toISOString() },
+        ]);
+      } else {
+        // Fallback: background refresh if no reply in body
+        const mRes = await fetch(`/api/neria/messages?threadId=${encodeURIComponent(data?.threadId || threadId)}`);
+        if (mRes.ok) {
+          const m = await mRes.json();
+          setMessages(m.messages || []);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSending(false);
+    }
+  }, [inputValue, currentChannelId, threadId]);
 
   // Mouse event handlers for dragging
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -239,28 +344,28 @@ const NeriaContainer: React.FC = () => {
             {/* Message Container */}
             {!isMinimized && (
               <div className="flex-1 overflow-y-auto space-y-4">
-                
-                {/* Neria Message */}
-                <div className="text-white space-y-4">
-                  <p className="text-base leading-relaxed opacity-80">
-                    Let's plan your next video. I've suggested a few different topics.
-                  </p>
-                  <p className="text-base leading-relaxed opacity-80">
-                    Choose one to get started, or provide me with other ideas and I can generate some more for you...
-                  </p>
-                </div>
-
-                {/* User Message Component */}
-                <div 
-                  className="px-4 py-3 text-white text-sm leading-relaxed"
-                  style={{ 
-                    backgroundColor: '#3086ff',
-                    borderRadius: '12px'
-                  }}
-                >
-                  Hm, I don't like any of these, could you come up with titles that have more to do with AI workflows in UI/UX design?
-                </div>
-
+                {initialLoading && (
+                  <div className="text-white/70 text-sm">Loading conversation…</div>
+                )}
+                {!initialLoading && messages.length === 0 && !sending && (
+                  <div className="text-white/70 text-sm">Ask Neria anything about your channel, strategy, or latest stats.</div>
+                )}
+                {!initialLoading && messages.map((m) => (
+                  <div key={m.id}>
+                    {m.role === 'user' ? (
+                      <div 
+                        className="px-4 py-3 text-white text-sm leading-relaxed ml-auto max-w-[85%]"
+                        style={{ backgroundColor: '#3086ff', borderRadius: '12px' }}
+                      >
+                        {m.content}
+                      </div>
+                    ) : (
+                      <div className="text-white space-y-4 max-w-[85%]">
+                        <p className="text-sm leading-relaxed opacity-90 whitespace-pre-wrap">{m.content}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -285,26 +390,57 @@ const NeriaContainer: React.FC = () => {
             
             {/* Chat Text Field */}
             <div className="flex-1">
-              <input
-                type="text"
-                placeholder="Ask Neria about your YouTube strategy..."
-                className="w-full px-4 py-3 bg-transparent border border-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-                style={{ borderRadius: '12px' }}
-                disabled
-              />
+              <form
+                id="neriaChatForm"
+                className="w-full"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!sending) {
+                    sendMessage();
+                  }
+                }}
+              >
+                <input
+                  name="neriaInput"
+                  type="text"
+                  placeholder="Ask Neria about your YouTube strategy..."
+                  className="w-full px-4 py-3 bg-transparent border border-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  style={{ borderRadius: '12px' }}
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!sending) sendMessage();
+                    }
+                  }}
+                  disabled={sending}
+                />
+              </form>
             </div>
             
             {/* Send Button */}
             <button 
+              type="button"
               className="w-10 h-10 text-white flex items-center justify-center transition-colors hover:bg-blue-600"
               style={{ 
                 backgroundColor: '#3086ff',
                 borderRadius: '12px'
               }}
+              aria-label="Send message"
+              onClick={() => { if (!sending) sendMessage(); }}
+              disabled={sending}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M12 19V5M5 12L12 5L19 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              {!sending ? (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 19V5M5 12L12 5L19 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              ) : (
+                <svg width="20" height="20" viewBox="0 0 24 24" className="animate-spin" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.3" strokeWidth="3" />
+                  <path d="M21 12a9 9 0 0 1-9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+              )}
             </button>
           </div>
         )}

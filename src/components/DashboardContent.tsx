@@ -20,7 +20,11 @@ const DashboardContent: React.FC<DashboardContentProps> = ({
   showChannelSelector = true,
   basePath = "/dashboard"
 }) => {
-  const { isFullscreen } = useNeria();
+  const { isFullscreen, setCurrentChannelId } = useNeria();
+
+  React.useEffect(() => {
+    setCurrentChannelId(currentChannelId);
+  }, [currentChannelId, setCurrentChannelId]);
 
   return (
     <div 

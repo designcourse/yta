@@ -66,6 +66,22 @@ If they seem to fully agree, respond with exactly: "SUCCESS"`;
       });
     }
 
+    // Persist refined plan draft
+    try {
+      // Resolve channel UUID
+      const { data: ch } = await supabase
+        .from('channels')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('channel_id', channelId)
+        .maybeSingle();
+      if (ch?.id) {
+        await supabase
+          .from('channel_strategy')
+          .upsert({ user_id: user.id, channel_id: ch.id, plan_text: refinedPlan, updated_at: new Date().toISOString() }, { onConflict: 'user_id,channel_id' });
+      }
+    } catch {}
+
     return NextResponse.json({ 
       status: 'continue',
       refinedPlan 

@@ -122,6 +122,18 @@ IMPORTANT: Write a SHORT strategy with EXACTLY 6 sentences or less. Cover the mo
 
     const strategy = completion.choices?.[0]?.message?.content || 'Unable to generate strategy at this time.';
 
+    // Persist strategy plan
+    try {
+      await supabase
+        .from('channel_strategy')
+        .upsert({
+          user_id: user.id,
+          channel_id: channelRecord.id,
+          plan_text: strategy,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,channel_id' });
+    } catch {}
+
     return NextResponse.json({ strategy });
   } catch (e: any) {
     console.error('Strategy generation error:', e);
