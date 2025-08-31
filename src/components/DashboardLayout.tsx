@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
-import DashboardSidebar from "./DashboardSidebar";
-import ChannelSelector from "./ChannelSelector";
 import NeriaContainer from "./NeriaContainer";
+import { NeriaProvider } from "./NeriaContext";
+import DashboardContent from "./DashboardContent";
 import { redirect } from "next/navigation";
 
 interface DashboardLayoutProps {
@@ -39,50 +39,34 @@ export default async function DashboardLayout({
   const decodedChannelId = channelId ? decodeURIComponent(channelId) : undefined;
 
   return (
-    <div className="min-h-screen dashboard-layout" style={{ backgroundColor: '#E6E8FC' }}>
-      {/* Hide spline canvas */}
-      <style dangerouslySetInnerHTML={{
-        __html: `
-          .dashboard-layout ~ * canvas,
-          body canvas {
-            display: none !important;
-          }
-          body {
-            background-color: #E6E8FC !important;
-          }
-        `
-      }} />
-      
-      {/* Container with adjusted width to account for Neria Container */}
-      <div className="ml-[213px] flex" style={{ width: 'calc(100% - 213px - min(460px, 25vw))' }}>
-        {/* Sidebar - Fixed width */}
-        <DashboardSidebar 
-          channels={channels} 
+    <NeriaProvider>
+      <div className="min-h-screen dashboard-layout" style={{ backgroundColor: '#E6E8FC' }}>
+        {/* Hide spline canvas */}
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            .dashboard-layout ~ * canvas,
+            body canvas {
+              display: none !important;
+            }
+            body {
+              background-color: #E6E8FC !important;
+            }
+          `
+        }} />
+        
+        {/* Container with adjusted width to account for Neria Container */}
+        <DashboardContent
+          channels={channels}
           currentChannelId={decodedChannelId}
-        />
+          showChannelSelector={showChannelSelector}
+          basePath={basePath}
+        >
+          {children}
+        </DashboardContent>
 
-        {/* Main Content Area */}
-        <div className="flex-1 ml-[20px]">
-          {/* Header with Channel Selector */}
-          {showChannelSelector && (
-            <header className="h-[104px] flex items-center justify-end px-5">
-              <ChannelSelector 
-                channels={channels}
-                currentChannelId={decodedChannelId}
-                basePath={basePath}
-              />
-            </header>
-          )}
-
-          {/* Main Content */}
-          <main className={`px-5 ${showChannelSelector ? 'pt-12' : 'pt-20'}`}>
-            {children}
-          </main>
-        </div>
+        {/* Neria Container - Fixed right aligned */}
+        <NeriaContainer />
       </div>
-
-      {/* Neria Container - Fixed right aligned */}
-      <NeriaContainer />
-    </div>
+    </NeriaProvider>
   );
 }
