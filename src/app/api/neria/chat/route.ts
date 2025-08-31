@@ -9,15 +9,84 @@ function getOpenAI() {
   return new OpenAI({ apiKey });
 }
 
-function checkForVideoTitleRequest(message: string): boolean {
-  const lowerMessage = message.toLowerCase();
-  const titleKeywords = ['title', 'titles', 'video title', 'video titles', 'video idea', 'video ideas'];
-  const generateKeywords = ['generate', 'create', 'make', 'suggest', 'come up with', 'think of'];
+async function analyzeUserIntent(message: string, currentUrl: string, channelId?: string): Promise<{
+  action: 'generate_video_titles' | 'navigate_to_planner' | 'navigate_to_goals' | 'navigate_to_analytics' | 'chat_only' | 'other';
+  requiresRedirect: boolean;
+  targetUrl?: string;
+  reasoning?: string;
+}> {
+  const openai = getOpenAI();
   
-  const hasTitleKeyword = titleKeywords.some(keyword => lowerMessage.includes(keyword));
-  const hasGenerateKeyword = generateKeywords.some(keyword => lowerMessage.includes(keyword));
-  
-  return hasTitleKeyword && hasGenerateKeyword;
+  const intentPrompt = `You are Neria, a YouTube strategy assistant. Analyze this user request and determine what action should be taken.
+
+USER REQUEST: "${message}"
+CURRENT URL: "${currentUrl}"
+
+Determine the appropriate action based on the user's intent:
+
+1. "generate_video_titles" - User wants video title ideas, suggestions, or inspiration
+2. "navigate_to_planner" - User wants to go to video planner but isn't asking for titles
+3. "navigate_to_goals" - User wants to set or view goals
+4. "navigate_to_analytics" - User wants to see performance data or analytics
+5. "chat_only" - User just wants to chat/ask questions, no specific action needed
+6. "other" - Some other action (describe in reasoning)
+
+Consider these patterns:
+- "give me titles", "generate titles", "video ideas", "what should I make videos about" = generate_video_titles
+- "show me planner", "go to planner", "take me to video planner" = navigate_to_planner  
+- "my goals", "set goals", "goal tracking" = navigate_to_goals
+- "how is my channel doing", "show analytics", "performance" = navigate_to_analytics
+- General questions, strategy advice, explanations = chat_only
+
+If the action requires the user to be on a different page than they currently are, set requiresRedirect to true and provide the targetUrl.
+For video title generation, if user is not on /planner page, redirect them there first.
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "action": "generate_video_titles",
+  "requiresRedirect": true,
+  "targetUrl": "/dashboard/${channelId || '{channelId}'}/planner",
+  "reasoning": "User is asking for video title generation"
+}`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: intentPrompt },
+        { role: 'user', content: 'Analyze the user request and respond with the action JSON.' }
+      ],
+      max_tokens: 200,
+      temperature: 0.1,
+    });
+
+    const response = completion.choices?.[0]?.message?.content?.trim() || '{}';
+    console.log('AI intent analysis response:', response);
+    
+    const intent = JSON.parse(response);
+    
+    // Validate the response
+    if (!intent.action || !['generate_video_titles', 'navigate_to_planner', 'navigate_to_goals', 'navigate_to_analytics', 'chat_only', 'other'].includes(intent.action)) {
+      throw new Error('Invalid action in AI response');
+    }
+    
+    console.log('Parsed intent:', intent);
+    
+    return {
+      action: intent.action,
+      requiresRedirect: intent.requiresRedirect || false,
+      targetUrl: intent.targetUrl,
+      reasoning: intent.reasoning || 'No reasoning provided'
+    };
+  } catch (error) {
+    console.error('Error analyzing user intent:', error);
+    // Fallback to chat_only if AI analysis fails
+    return {
+      action: 'chat_only',
+      requiresRedirect: false,
+      reasoning: 'Failed to analyze intent, defaulting to chat'
+    };
+  }
 }
 
 async function getCurrentModel(supabase: any) {
@@ -632,21 +701,40 @@ export async function POST(request: Request) {
             .from("chat_messages")
             .insert({ thread_id: threadId, role: "assistant", content: assistantContent });
 
-          // Check if the user's message is asking for video title generation
-          const isVideoTitleRequest = checkForVideoTitleRequest(body.message);
-          if (isVideoTitleRequest && pinned.channelId && pinned.channelMeta?.externalId) {
+          // Analyze user intent using AI
+          const intent = await analyzeUserIntent(
+            body.message, 
+            body.currentUrl || '', 
+            pinned.channelMeta?.externalId
+          );
+          
+          console.log('AI Intent Analysis:', {
+            message: body.message,
+            currentUrl: body.currentUrl,
+            intent,
+            hasChannelId: !!pinned.channelId,
+            hasExternalId: !!pinned.channelMeta?.externalId
+          });
+          
+          // Handle the determined intent
+          if (intent.action === 'generate_video_titles' && pinned.channelId && pinned.channelMeta?.externalId) {
             try {
-              // Check if user needs to be redirected to planner page
               const currentUrl = body.currentUrl || '';
               const isOnPlannerPage = currentUrl.includes('/planner');
               
-              if (!isOnPlannerPage) {
+              if (!isOnPlannerPage && intent.requiresRedirect) {
                 // Send redirect event first
+                console.log('AI determined redirect needed to:', intent.targetUrl);
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                   type: 'redirect_to_planner',
                   channelId: pinned.channelMeta.externalId,
                   message: 'Taking you to the Video Planner to see your new titles...'
                 })}\n\n`));
+                
+                // Add a small delay to ensure redirect happens before other events
+                await new Promise(resolve => setTimeout(resolve, 100));
+              } else {
+                console.log('User already on planner page or no redirect needed');
               }
               
               // Dispatch event that video generation has started
@@ -694,6 +782,25 @@ export async function POST(request: Request) {
               }
             } catch (error) {
               console.error('Error generating video ideas from chat:', error);
+            }
+          } else if (intent.requiresRedirect && intent.targetUrl && pinned.channelMeta?.externalId) {
+            // Handle other navigation intents
+            try {
+              console.log('AI determined navigation needed:', intent);
+              
+              // Replace {channelId} placeholder in targetUrl if present
+              const targetUrl = intent.targetUrl.replace('{channelId}', pinned.channelMeta.externalId);
+              
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                type: 'navigate',
+                targetUrl: targetUrl,
+                message: `Taking you to ${intent.action.replace('navigate_to_', '').replace('_', ' ')}...`
+              })}\n\n`));
+              
+              // Add a small delay for navigation
+              await new Promise(resolve => setTimeout(resolve, 100));
+            } catch (error) {
+              console.error('Error handling navigation intent:', error);
             }
           }
 

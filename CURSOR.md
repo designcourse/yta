@@ -61,6 +61,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Context Percentage Indicator**: Real-time visual display of conversation context usage with Cursor-style radial progress
 - **GPT-4o Integration**: Premium AI model for highest quality responses and strategic insights
 - **Token Counting**: Accurate context calculation using empirical estimation for optimal performance
+- **AI-Powered Intent Detection**: Advanced natural language understanding system that analyzes user requests to determine appropriate actions (video title generation, navigation, analytics viewing, etc.) replacing brittle keyword matching with robust AI-driven intent recognition
 
 #### 5. **Comprehensive Dashboard System**
 - **DashboardLayout Component**: Unified layout with sidebar navigation and channel selector
@@ -326,6 +327,30 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - **Send flow**: messages are optimistically added in the UI, then `POST /api/neria/chat` is called with `{ channelId, threadId, message }`. The response streams in real-time using Server-Sent Events, with text appearing character-by-character as generated. The `threadId` is persisted if newly created.
 - **Per-channel memory**: last thread id is persisted per channel in `localStorage`, enabling seamless continuity as users navigate dashboard pages for the same channel.
 - **UI behavior**: the chat window can be minimized or detached into a floating, draggable/resizable panel; state is managed via `NeriaContext` and component state.
+
+### AI Intent Detection & Action System
+- **Natural Language Understanding**: Advanced AI-powered system that analyzes user requests to determine appropriate actions, replacing brittle keyword matching with robust intent recognition
+- **Action Types**: Supports multiple intent categories including `generate_video_titles`, `navigate_to_planner`, `navigate_to_goals`, `navigate_to_analytics`, `chat_only`, and extensible `other` actions
+- **Smart Redirect Logic**: AI determines not only what action to take but whether navigation is needed and where to redirect based on current page context
+- **Extensible Architecture**: Built for future expansion to handle additional app actions and navigation patterns as the platform grows
+- **Context Awareness**: Intent analysis considers both the user's message and their current location in the app to make intelligent routing decisions
+
+### Database Maintenance & Schema Compliance
+
+**IMPORTANT: Whenever using the Supabase MCP server to examine the database schema, always verify and update the "wipe all data" API to ensure it includes all user-specific tables.**
+
+**Automated Maintenance Instructions:**
+1. **Schema Check**: When using `mcp_supabase_list_tables` to examine the database, compare the results against the tables deleted in `/api/wipe-all-data/route.ts`
+2. **Required Action**: If any user-specific tables are missing from the wipe API, immediately update it to include those tables
+3. **Table Categories to Include**:
+   - All tables with `user_id` foreign keys
+   - All tables with `channel_id` foreign keys (since channels belong to users)
+   - Chat-related tables (`chat_threads`, `chat_messages`, `thread_summaries`)
+   - User-generated content tables (`video_planner_ideas`, `memory_profile`, etc.)
+4. **Tables to Exclude**: System tables (`model_settings`, `model_providers`, `temp_sync_data`)
+5. **Update Pattern**: Add new table deletions in the channel-related section if they have `channel_id`, or in the user-specific section if they only have `user_id`
+
+**Current Tables Included in Wipe API:** `neria_context`, `latest_video_snapshots`, `stats_snapshots`, `memory_profile`, `channel_strategy`, `channel_questions`, `collection_chunks`, `memory_longterm`, `video_planner_ideas`, `chat_messages`, `thread_summaries`, `chat_threads`, `channels`, `google_accounts`
 
 ## 📋 Recent Session Updates (January 2025)
 

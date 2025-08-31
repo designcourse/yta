@@ -80,6 +80,13 @@ export async function POST(request: Request) {
         .in("channel_id", channelIds);
       if (memoryLongtermError) console.warn("⚠️ Error deleting memory_longterm:", memoryLongtermError);
 
+      // Delete video_planner_ideas
+      const { error: videoPlannerIdeasError } = await admin
+        .from("video_planner_ideas")
+        .delete()
+        .in("channel_id", channelIds);
+      if (videoPlannerIdeasError) console.warn("⚠️ Error deleting video_planner_ideas:", videoPlannerIdeasError);
+
       console.log("✅ Successfully deleted channel-related data");
     }
 

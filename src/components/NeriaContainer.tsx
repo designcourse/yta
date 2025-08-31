@@ -147,6 +147,13 @@ const NeriaContainer: React.FC = () => {
 
     try {
       setSending(true);
+      console.log('Sending Neria message:', {
+        channelId: currentChannelId,
+        threadId,
+        message: value,
+        currentUrl: window.location.pathname
+      });
+      
       const res = await fetch('/api/neria/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -207,10 +214,23 @@ const NeriaContainer: React.FC = () => {
                   break;
                 } else if (data.type === 'redirect_to_planner') {
                   // Redirect to planner page with loading state
-                  console.log('Redirecting to planner page:', data.message);
+                  console.log('Redirecting to planner page:', data.message, 'channelId:', data.channelId);
                   if (data.channelId) {
                     // Add URL parameter to indicate video generation is in progress
-                    router.push(`/dashboard/${data.channelId}/planner?generating=chat`);
+                    const targetUrl = `/dashboard/${data.channelId}/planner?generating=chat`;
+                    console.log('Redirecting to URL:', targetUrl);
+                    router.push(targetUrl);
+                  } else {
+                    console.error('No channelId provided for redirect');
+                  }
+                } else if (data.type === 'navigate') {
+                  // Handle general navigation from AI intent
+                  console.log('AI-requested navigation:', data.message, 'to:', data.targetUrl);
+                  if (data.targetUrl) {
+                    console.log('Navigating to URL:', data.targetUrl);
+                    router.push(data.targetUrl);
+                  } else {
+                    console.error('No targetUrl provided for navigation');
                   }
                 } else if (data.type === 'video_ideas_generating') {
                   // Video ideas generation started, dispatch a custom event
