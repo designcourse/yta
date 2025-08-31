@@ -32,11 +32,26 @@ Determine the appropriate action based on the user's intent:
 6. "other" - Some other action (describe in reasoning)
 
 Consider these patterns:
-- "give me titles", "generate titles", "video ideas", "what should I make videos about" = generate_video_titles
+- "give me titles", "generate titles", "video ideas", "what should I make videos about", "suggest video topics", "create video titles" = generate_video_titles
 - "show me planner", "go to planner", "take me to video planner" = navigate_to_planner  
 - "my goals", "set goals", "goal tracking" = navigate_to_goals
 - "how is my channel doing", "show analytics", "performance" = navigate_to_analytics
-- General questions, strategy advice, explanations = chat_only
+- General questions, strategy advice, explanations, asking about topics/trends = chat_only
+
+IMPORTANT: Only use "generate_video_titles" if the user is EXPLICITLY asking for video title suggestions, video ideas, or content creation help. Questions about topics, trends, or general information should be "chat_only".
+
+Examples of "chat_only":
+- "what is the most popular metal track..."
+- "tell me about..."
+- "how do I..."
+- "what are the trends in..."
+- "explain..."
+
+Examples of "generate_video_titles":
+- "give me video ideas"
+- "suggest titles for my channel"
+- "what videos should I make"
+- "create video titles about..."
 
 If the action requires the user to be on a different page than they currently are, set requiresRedirect to true and provide the targetUrl.
 For video title generation, if user is not on /planner page, redirect them there first.
