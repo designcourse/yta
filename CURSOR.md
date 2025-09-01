@@ -17,7 +17,7 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **Database**: Supabase (PostgreSQL)
 - **Authentication**: Supabase Auth with Google OAuth
 - **APIs**: YouTube Data API v3, YouTube Analytics API
-- **AI**: OpenAI API for Neria AI assistant
+- **AI**: OpenAI (GPT-4o) for Neria Chat by default; Perplexity only for real-time web search
 - **3D Graphics**: Spline (@splinetool/react-spline)
 - **External Libraries**: googleapis (for direct Google API access)
 
@@ -60,6 +60,8 @@ A YouTube analytics app for creators that allows them to connect their YouTube c
 - **NeriaContainer Component**: Floating AI assistant window with minimize/detach functionality and streaming chat
 - **Context Percentage Indicator**: Real-time visual display of conversation context usage with Cursor-style radial progress
 - **GPT-4o Integration**: Premium AI model for highest quality responses and strategic insights
+- **Multi-model Routing**: GPT-4o is the primary model; Perplexity is invoked only when GPT-4o detects the need for real-time web search, and Perplexity results are fed back into GPT-4o for the final response
+- **Real-time Research Events**: When Perplexity is used, a `realtime_research` SSE event is emitted before the main stream
 - **Token Counting**: Accurate context calculation using empirical estimation for optimal performance
 - **AI-Powered Intent Detection**: Advanced natural language understanding system that analyzes user requests to determine appropriate actions (video title generation, navigation, analytics viewing, etc.) replacing brittle keyword matching with robust AI-driven intent recognition
 
@@ -367,6 +369,11 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - **Premium Quality**: Users now receive highest-tier AI responses for strategic YouTube coaching
 - **Context Optimization**: Adjusted token calculations for GPT-4o's 4k output limit vs 8k on mini
 - **Verification**: Debug logging confirmed successful model upgrade and proper token calculations
+
+### **Neria Chat Model Routing Change**
+- **Default Model**: Neria Chat now defaults to OpenAI GPT-4o (no longer Perplexity by default)
+- **Perplexity Usage**: Perplexity is used only for real-time web search. GPT-4o first decides if up-to-date information is required; if yes, Perplexity fetches results which are then provided back to GPT-4o to compose the final answer.
+- **Streaming**: Streaming remains via SSE; a `realtime_research` event is sent when Perplexity is invoked.
 
 ### **Enhanced Data Management**
 - **Comprehensive Wipe**: Updated wipe-all-data API to include all newer tables (chat_threads, messages, profiles, etc.)
