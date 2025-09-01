@@ -77,8 +77,7 @@ button, .border {
 /* Neria Chat Loading Animation */
 @keyframes neriaGradientAnimation {
   0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
 }
 
 .neria-loading-border {
@@ -112,9 +111,9 @@ button, .border {
 }
 
 .planner-card-hover:hover {
-  background: linear-gradient(60deg, #f79533, #f37055, #ef4e7b, #a166ab, #5073b8, #1098ad, #07b39b, #6fba82);
+  background: linear-gradient(60deg, #919aff, #acb3ff, #dfaefc, #E6E8FC, #E6E8FC, #6d79ff, #E6E8FC, #E6E8FC);
   background-size: 300% 300%;
-  animation: neriaGradientAnimation 3s ease infinite;
+  animation: neriaGradientAnimation 2s ease infinite alternate;
 }
 
 .planner-card-hover > * {
@@ -122,4 +121,9 @@ button, .border {
   background: #fff;
   position: relative;
   z-index: 1;
+  transition: transform 0.3s ease;
+}
+
+.planner-card-hover:hover > * {
+  transform: scale(1.02);
 }
