@@ -12,7 +12,7 @@ async function getCurrentModel(supabase: any) {
   if (!settings?.current_model_id) {
     return {
       provider: "perplexity",
-      model: "llama-3.1-sonar-large-128k-online",
+      model: "sonar-pro",
       max_input_tokens: 127072,
       max_output_tokens: 8192
     };
@@ -26,7 +26,7 @@ async function getCurrentModel(supabase: any) {
 
   return modelProvider || {
     provider: "perplexity",
-    model: "llama-3.1-sonar-large-128k-online",
+    model: "sonar-pro",
     max_input_tokens: 127072,
     max_output_tokens: 8192
   };

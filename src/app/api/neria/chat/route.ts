@@ -4,6 +4,79 @@ import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getClient, getCurrentModel } from "@/utils/openai";
 import { getPrompt } from "@/utils/prompts";
 
+// Normalize relative time expressions (e.g., "this year") to absolute dates for search queries
+function normalizeRelativeTimeInQuery(text: string): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+  const monthIndex = now.getMonth();
+  const thisMonthName = monthNames[monthIndex];
+
+  const formatDate = (d: Date) => d.toISOString().slice(0,10);
+
+  let result = text;
+
+  // this year
+  result = result.replace(/\bthis year\b/gi, String(year));
+
+  // this month
+  result = result.replace(/\bthis month\b/gi, `${thisMonthName} ${year}`);
+
+  // today
+  result = result.replace(/\btoday\b/gi, formatDate(now));
+
+  // yesterday
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  result = result.replace(/\byesterday\b/gi, formatDate(yest));
+
+  // this week -> date range Mon..Sun (ISO week: Monday start)
+  result = result.replace(/\bthis week\b/gi, () => {
+    const d = new Date(now);
+    const day = (d.getDay() + 6) % 7; // 0=Mon
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - day);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return `from ${formatDate(monday)} to ${formatDate(sunday)}`;
+  });
+
+  // last week -> previous Mon..Sun
+  result = result.replace(/\blast week\b/gi, () => {
+    const d = new Date(now);
+    const day = (d.getDay() + 6) % 7; // 0=Mon
+    const lastMonday = new Date(d);
+    lastMonday.setDate(d.getDate() - day - 7);
+    const lastSunday = new Date(lastMonday);
+    lastSunday.setDate(lastMonday.getDate() + 6);
+    return `from ${formatDate(lastMonday)} to ${formatDate(lastSunday)}`;
+  });
+
+  // last month
+  result = result.replace(/\blast month\b/gi, () => {
+    const d = new Date(year, monthIndex - 1, 1);
+    const name = monthNames[d.getMonth()];
+    return `${name} ${d.getFullYear()}`;
+  });
+
+  // last few months -> last 3 months range
+  result = result.replace(/\blast few months\b/gi, () => {
+    const start = new Date(year, monthIndex - 2, 1);
+    const startName = monthNames[start.getMonth()];
+    return `from ${startName} ${start.getFullYear()} to ${thisMonthName} ${year}`;
+  });
+
+  // last N months -> compute range
+  result = result.replace(/\blast (\d{1,2}) months\b/gi, (_: string, nStr: string) => {
+    const n = Math.max(1, Math.min(24, parseInt(nStr, 10)));
+    const start = new Date(year, monthIndex - (n - 1), 1);
+    const startName = monthNames[start.getMonth()];
+    return `from ${startName} ${start.getFullYear()} to ${thisMonthName} ${year}`;
+  });
+
+  return result;
+}
+
 async function analyzeUserIntent(message: string, currentUrl: string, channelId?: string, supabase?: any): Promise<{
   action: 'generate_video_titles' | 'navigate_to_planner' | 'navigate_to_goals' | 'navigate_to_analytics' | 'chat_only' | 'other';
   requiresRedirect: boolean;
@@ -61,11 +134,11 @@ Respond ONLY with valid JSON in this exact format:
   "targetUrl": "/dashboard/${channelId || '{channelId}'}/planner",
   "reasoning": "User is asking for video title generation"
 }
+`;
 
-For navigation actions, use these target URLs:
-- navigate_to_goals: "/dashboard/${channelId || '{channelId}'}/my-goals"
-- navigate_to_analytics: "/dashboard/${channelId || '{channelId}'}/best-performing"
-- navigate_to_planner: "/dashboard/${channelId || '{channelId}'}/planner"`;
+// (removed duplicate helper; now defined near the top of the file)
+
+ 
 
   try {
     const completion = await client.chat.completions.create({
@@ -246,7 +319,7 @@ async function shouldUseRealtimeSearch(message: string): Promise<{ needsSearch: 
 async function runPerplexitySearch(query: string): Promise<{ content: string; sources?: string[] }> {
   console.log('[Neria][Realtime] Running Perplexity search...', { query });
   const client = getClient('perplexity');
-  // Use a valid Perplexity online model
+  // Use a valid Perplexity online model; fall back if unavailable
   const model = 'sonar-pro';
   const completion = await client.chat.completions.create({
     model,
@@ -268,6 +341,82 @@ async function runPerplexitySearch(query: string): Promise<{ content: string; so
   const sources = Array.from(new Set(content.match(urlRegex) || [])).slice(0, 8);
   console.log('[Neria][Realtime] Perplexity search complete', { contentLength: content.length, sourcesCount: sources.length });
   return { content, sources };
+}
+
+// Pull a verified list of recent metal songs from Perplexity with strict JSON structure
+async function fetchVerifiedRecentMetalSongs(userRequest: string): Promise<Array<{ song: string; artist: string; month?: string; url?: string }>> {
+  try {
+    const client = getClient('perplexity');
+    const model = 'sonar-pro';
+
+    // Try to infer a year from the request; default to current year
+    const yearMatch = userRequest.match(/20\d{2}/);
+    const year = yearMatch ? yearMatch[0] : String(new Date().getFullYear());
+
+    const messages = [
+      {
+        role: 'system',
+        content:
+          'You are a meticulous fact-checking research assistant. Only return information you can cite with an authoritative source URL. You must not invent song or band names.',
+      },
+      {
+        role: 'user',
+        content:
+          `List 12 popular metal songs released in the last 3 months of ${year}. Only include songs by well-known bands. Return STRICT JSON only with an array under the key songs, where each item has: song (exact title), artist (band name), month (MMM YYYY), url (primary source such as the band site, label page, or major publication). Do not include any other text.`,
+      },
+    ];
+
+    const completion = await client.chat.completions.create({
+      model,
+      messages,
+      max_tokens: 900,
+      temperature: 0,
+    });
+
+    const raw = completion.choices?.[0]?.message?.content || '';
+    let jsonText = raw.trim();
+    jsonText = jsonText.replace(/```json|```/g, '').trim();
+    // Best effort slice between braces
+    const start = jsonText.indexOf('{');
+    const end = jsonText.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      jsonText = jsonText.slice(start, end + 1);
+    }
+    const parsed = JSON.parse(jsonText);
+    const items = Array.isArray(parsed?.songs) ? parsed.songs : [];
+
+    // Basic normalization & dedupe
+    const seen = new Set<string>();
+    const result: Array<{ song: string; artist: string; month?: string; url?: string }> = [];
+    for (const item of items) {
+      const song = String(item?.song || '').trim();
+      const artist = String(item?.artist || '').trim();
+      if (!song || !artist) continue;
+      const key = `${song.toLowerCase()}__${artist.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push({ song, artist, month: item?.month ? String(item.month) : undefined, url: item?.url ? String(item.url) : undefined });
+    }
+
+    return result.slice(0, 12);
+  } catch (error) {
+    console.warn('[Neria][Research] Failed to fetch verified recent metal songs:', error);
+    return [];
+  }
+}
+
+function validateTitlesAgainstSongs(titleIdeas: string[], songs: Array<{ song: string; artist: string }>): string[] {
+  const normalizedSongs = songs.map(s => ({
+    song: s.song.toLowerCase(),
+    artist: s.artist.toLowerCase(),
+  }));
+
+  const isTitleValid = (title: string) => {
+    const t = title.toLowerCase();
+    return normalizedSongs.some(s => t.includes(s.song) || t.includes(s.artist));
+  };
+
+  return titleIdeas.filter(t => typeof t === 'string' && t.trim().length > 0 && isTitleValid(t));
 }
 
 type ChatPostBody = {
@@ -521,6 +670,33 @@ async function generateVideoIdeas(supabase: any, userId: string, channelId: stri
 Please generate titles that specifically address this request while still following all other requirements.`;
     }
 
+    // If the user's request appears to require up-to-date info (e.g., "recent", "latest", years),
+    // fetch verifiable context from Perplexity and constrain the title generation to those facts.
+    try {
+      let decision = await shouldUseRealtimeSearch(customPrompt || "");
+      if (decision?.needsSearch && decision.query) {
+        const normalized = normalizeRelativeTimeInQuery(decision.query);
+        if (normalized !== decision.query) {
+          decision = { ...decision, query: normalized };
+        }
+      }
+      if (decision.needsSearch) {
+        // Fetch a strict JSON list of recent songs for validation
+        const verifiedSongs = await fetchVerifiedRecentMetalSongs(decision.query);
+        if (verifiedSongs.length > 0) {
+          const topFew = verifiedSongs.slice(0, 12).map(s => `- ${s.artist} — ${s.song}${s.month ? ` (${s.month})` : ''}${s.url ? ` [${s.url}]` : ''}`).join('\n');
+          prompt += `\n\nVERIFIED RECENT SONGS (only use these exact names if you reference songs):\n${topFew}\n\nSTRICT RULES:\n- Do NOT invent or guess any song or band names.\n- If you reference specific songs, ONLY use the exact titles/artists listed above.\n- It's acceptable to produce broader lesson titles without specific new song names.`;
+        } else {
+          const research = await runPerplexitySearch(decision.query);
+          if (research?.content) {
+            prompt += `\n\nREAL-TIME RESEARCH (use facts only, no inventions):\n${research.content}\n\nRULES:\n- If song titles are not explicitly present, avoid naming specific new songs.\n- Prefer broader lesson ideas or older well-known classics.`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Neria][VideoIdeas] Realtime research step failed or was skipped:', e);
+    }
+
     const completion = await client.chat.completions.create({
       model: modelConfig.model,
       messages: [
@@ -542,6 +718,26 @@ Please generate titles that specifically address this request while still follow
     } catch (error) {
       console.error('Error parsing AI response for video ideas:', error);
       return false;
+    }
+
+    // If we fetched verified songs above, defensively validate titles against them
+    try {
+      const looksRecent = /recent|latest|new|\b20\d{2}\b/i.test(customPrompt || '');
+      if (looksRecent) {
+        const verifiedSongs = await fetchVerifiedRecentMetalSongs(customPrompt || '');
+        if (verifiedSongs.length > 0) {
+          const validated = validateTitlesAgainstSongs(titleIdeas, verifiedSongs);
+          if (validated.length >= 4) {
+            titleIdeas = validated.slice(0, 6);
+          } else {
+            // Not enough validated titles; convert to generic ideas to avoid hallucinations
+            // Preserve apostrophes; only strip suspicious parenthetical claims
+            titleIdeas = titleIdeas.map(t => t.replace(/\b\((?:new|202\d).*?\)/gi, '').trim()).slice(0, 6);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Neria][VideoIdeas] Validation step skipped due to error:', e);
     }
 
     // Delete old ideas for this channel first
@@ -935,7 +1131,14 @@ export async function POST(request: Request) {
 
     // Optional: real-time research step
     let research: { content: string; sources?: string[] } | null = null;
-    const realtimeDecision = await shouldUseRealtimeSearch(body.message);
+    let realtimeDecision = await shouldUseRealtimeSearch(body.message);
+    // Normalize relative-time phrases in the detected query to reflect the actual current date
+    if (realtimeDecision?.needsSearch && realtimeDecision.query) {
+      const normalized = normalizeRelativeTimeInQuery(realtimeDecision.query);
+      if (normalized !== realtimeDecision.query) {
+        realtimeDecision = { ...realtimeDecision, query: normalized };
+      }
+    }
     console.log('[Neria][Realtime] Should use search?', realtimeDecision);
     if (realtimeDecision.needsSearch) {
       try {

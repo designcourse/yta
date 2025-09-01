@@ -43,7 +43,7 @@ function getClient(provider: string) {
   }
 }
 
-export async function interpretYouTubeData(data: any, prompt?: string, provider: string = 'perplexity', model: string = 'llama-3.1-sonar-large-128k-online') {
+export async function interpretYouTubeData(data: any, prompt?: string, provider: string = 'perplexity', model: string = 'sonar-pro') {
   const defaultPrompt = `Analyze this YouTube data and provide insights about the channel's performance, content strategy, and audience engagement. Focus on key metrics, trends, and actionable recommendations. You have access to real-time information, so include recent trends and current market context where relevant.`;
 
   try {
