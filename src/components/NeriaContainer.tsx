@@ -1,14 +1,51 @@
 'use client';
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useNeria } from './NeriaContext';
 import ContextIndicator from './ContextIndicator';
+
+// Simple function to convert markdown links to clickable HTML
+function parseMarkdownLinks(text: string): React.ReactElement {
+  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const parts: (string | React.ReactElement)[] = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = linkRegex.exec(text)) !== null) {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    // Add the link
+    const linkText = match[1];
+    const linkUrl = match[2];
+    parts.push(
+      <a
+        key={match.index}
+        href={linkUrl}
+        className="text-blue-300 hover:text-blue-200 underline"
+        target={linkUrl.startsWith('http') ? '_blank' : '_self'}
+        rel={linkUrl.startsWith('http') ? 'noopener noreferrer' : undefined}
+      >
+        {linkText}
+      </a>
+    );
+
+    lastIndex = linkRegex.lastIndex;
+  }
+
+  // Add remaining text after the last link
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return <>{parts}</>;
+}
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
   const { isFullscreen, setIsFullscreen, currentChannelId } = useNeria();
-  const router = useRouter();
   
   // Position and size state for when in fullscreen/absolute mode
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -292,27 +329,13 @@ const NeriaContainer: React.FC = () => {
                 } else if (data.type === 'done') {
                   // Streaming complete
                   break;
-                } else if (data.type === 'redirect_to_planner') {
-                  // Redirect to planner page with loading state
-                  console.log('Redirecting to planner page:', data.message, 'channelId:', data.channelId);
-                  if (data.channelId) {
-                    // Add URL parameter to indicate video generation is in progress
-                    const promptParam = data.customPrompt ? `&prompt=${encodeURIComponent(data.customPrompt)}` : '';
-                    const targetUrl = `/dashboard/${data.channelId}/planner?generating=chat${promptParam}`;
-                    console.log('Redirecting to URL:', targetUrl);
-                    router.push(targetUrl);
-                  } else {
-                    console.error('No channelId provided for redirect');
-                  }
-                } else if (data.type === 'navigate') {
-                  // Handle general navigation from AI intent
-                  console.log('AI-requested navigation:', data.message, 'to:', data.targetUrl);
-                  if (data.targetUrl) {
-                    console.log('Navigating to URL:', data.targetUrl);
-                    router.push(data.targetUrl);
-                  } else {
-                    console.error('No targetUrl provided for navigation');
-                  }
+                } else if (data.type === 'message') {
+                  // Handle regular message (including those with links)
+                  const assistantId = `asst-message-${Date.now()}`;
+                  setMessages((prev) => [
+                    ...prev,
+                    { id: assistantId, role: 'assistant', content: data.content, created_at: new Date().toISOString() },
+                  ]);
                 } else if (data.type === 'video_ideas_generating') {
                   // Video ideas generation started, dispatch a custom event
                   console.log('Dispatching video-ideas-generating event:', data.message);
@@ -605,7 +628,7 @@ const NeriaContainer: React.FC = () => {
                       </div>
                     ) : (
                       <div className="text-white space-y-4 max-w-[85%]">
-                        <p className="text-base leading-relaxed opacity-90 whitespace-pre-wrap">{m.content}</p>
+                        <div className="text-base leading-relaxed opacity-90 whitespace-pre-wrap">{parseMarkdownLinks(m.content)}</div>
                       </div>
                     )}
                   </div>

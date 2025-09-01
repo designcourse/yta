@@ -31,14 +31,16 @@ async function getCurrentModel(supabase: any) {
   };
 }
 
-function countTokens(messages: Array<{ role: string; content: string }>, model: string): number {
+async function countTokens(messages: Array<{ role: string; content: string }>, model: string): Promise<number> {
   // Calculate total character length for debugging
   const totalChars = messages.reduce((acc, msg) => acc + msg.role.length + msg.content.length, 0);
   console.log(`Token counting - Model: ${model}, Messages: ${messages.length}, Total chars: ${totalChars}`);
   
   try {
-    // Use tiktoken for accurate token counting when available
-    const { encoding_for_model } = require('tiktoken');
+    // Try to use tiktoken for accurate token counting when available
+    // Import dynamically to avoid issues in different environments
+    const tiktoken = await import('tiktoken');
+    const { encoding_for_model } = tiktoken;
     
     // Map models to their appropriate tiktoken encodings
     let encodingName = 'cl100k_base'; // Default for GPT-4/GPT-3.5
@@ -315,7 +317,7 @@ export async function GET(request: Request) {
           messageArray.push({ role: m.role, content: m.content });
         }
         
-        const inputTokens = countTokens(messageArray, modelConfig.model);
+        const inputTokens = await countTokens(messageArray, modelConfig.model);
         const maxTokens = modelConfig.max_input_tokens - modelConfig.max_output_tokens;
         contextPercentage = Math.min(100, Math.ceil((inputTokens / maxTokens) * 100));
       } catch (error) {

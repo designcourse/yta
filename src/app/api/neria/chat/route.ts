@@ -48,8 +48,8 @@ Examples of "generate_video_titles":
 - "what videos should I make"
 - "create video titles about..."
 
-If the action requires the user to be on a different page than they currently are, set requiresRedirect to true and provide the targetUrl.
-For video title generation, if user is not on /planner page, redirect them there first.
+If the action would benefit from the user visiting a specific page, set requiresRedirect to true and provide the targetUrl - this will be used to generate a helpful link in the chat response instead of automatically redirecting.
+For video title generation, if user is not on /planner page, provide a link to the planner page.
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -57,7 +57,12 @@ Respond ONLY with valid JSON in this exact format:
   "requiresRedirect": true,
   "targetUrl": "/dashboard/${channelId || '{channelId}'}/planner",
   "reasoning": "User is asking for video title generation"
-}`;
+}
+
+For navigation actions, use these target URLs:
+- navigate_to_goals: "/dashboard/${channelId || '{channelId}'}/my-goals"
+- navigate_to_analytics: "/dashboard/${channelId || '{channelId}'}/best-performing"
+- navigate_to_planner: "/dashboard/${channelId || '{channelId}'}/planner"`;
 
   try {
     // Get current model configuration
@@ -133,14 +138,16 @@ async function getCurrentModelWithSupabase(supabase: any) {
   };
 }
 
-function countTokens(messages: Array<{ role: string; content: string }>, model: string): number {
+async function countTokens(messages: Array<{ role: string; content: string }>, model: string): Promise<number> {
   // Calculate total character length for debugging
   const totalChars = messages.reduce((acc, msg) => acc + msg.role.length + msg.content.length, 0);
   console.log(`Token counting - Model: ${model}, Messages: ${messages.length}, Total chars: ${totalChars}`);
   
   try {
-    // Use tiktoken for accurate token counting when available
-    const { encoding_for_model } = require('tiktoken');
+    // Try to use tiktoken for accurate token counting when available
+    // Import dynamically to avoid issues in different environments
+    const tiktoken = await import('tiktoken');
+    const { encoding_for_model } = tiktoken;
     
     // Map models to their appropriate tiktoken encodings
     let encodingName = 'cl100k_base'; // Default for GPT-4/GPT-3.5
@@ -737,27 +744,29 @@ export async function POST(request: Request) {
           async start(controller) {
             const encoder = new TextEncoder();
             
-            // If user needs to be redirected, send redirect event and end
+            // If user needs to go to planner page, send link instead of redirect
             if (!isOnPlannerPage && intent.requiresRedirect && intent.targetUrl) {
-              console.log('User not on planner page, redirecting to planner');
+              console.log('User not on planner page, sending planner link');
               
-              // Generate contextual response first
-              const contextualResponse = await generateContextualResponse(body.message, pinned);
+              // Generate contextual response with clickable link
+              const plannerUrl = `/dashboard/${pinned.channelMeta.externalId}/planner`;
+              const promptParam = body.message ? `?prompt=${encodeURIComponent(body.message)}` : '';
+              const fullPlannerUrl = plannerUrl + promptParam;
               
-              // Store the brief response in database
+              const contextualResponse = `I'd be happy to help you generate video titles! To create personalized video ideas for your channel, please visit the [Video Planner](${fullPlannerUrl}) where I can generate titles based on your content strategy and audience.`;
+              
+              // Store the response in database
               await supabase
                 .from("chat_messages")
                 .insert({ thread_id: threadId, role: "assistant", content: contextualResponse });
               
-              // Send the redirect event (include user's specific request so planner can use it)
+              // Send the message with link
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'redirect_to_planner',
-                message: contextualResponse,
-                channelId: pinned.channelMeta.externalId,
-                customPrompt: body.message
+                type: 'message',
+                content: contextualResponse
               })}\n\n`));
               
-              // End stream after redirect - planner page will handle generation
+              // End stream
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
               controller.close();
               return;
@@ -872,7 +881,7 @@ export async function POST(request: Request) {
     console.log('Final messages structure:', messages.map(m => ({ role: m.role, contentLength: m.content.length })));
 
     // Calculate context usage
-    const inputTokens = countTokens(messages, modelConfig.model);
+    const inputTokens = await countTokens(messages, modelConfig.model);
     const maxTokens = modelConfig.max_input_tokens - modelConfig.max_output_tokens; // Reserve space for output
     const contextPercentage = Math.min(100, Math.ceil((inputTokens / maxTokens) * 100));
     
@@ -936,23 +945,31 @@ export async function POST(request: Request) {
             hasExternalId: !!pinned.channelMeta?.externalId
           });
           
-          // Handle other navigation intents
+          // Handle other navigation intents - send links instead of redirects
           if (intent.requiresRedirect && intent.targetUrl && pinned.channelMeta?.externalId) {
-            // Handle other navigation intents
             try {
-              console.log('AI determined navigation needed:', intent);
+              console.log('AI determined navigation needed, sending link instead:', intent);
               
               // Replace {channelId} placeholder in targetUrl if present
               const targetUrl = intent.targetUrl.replace('{channelId}', pinned.channelMeta.externalId);
               
+              // Generate appropriate message with clickable link based on intent
+              let linkMessage = '';
+              if (intent.action === 'navigate_to_goals') {
+                linkMessage = `I can help you with goal tracking! Please visit your [Goals Dashboard](${targetUrl}) to set up and monitor your YouTube growth targets.`;
+              } else if (intent.action === 'navigate_to_analytics') {
+                linkMessage = `I'd be happy to help you analyze your channel performance! Check out your [Analytics Dashboard](${targetUrl}) to see detailed insights about your videos and audience.`;
+              } else {
+                // Fallback for other navigation types
+                const pageName = intent.action.replace('navigate_to_', '').replace('_', ' ');
+                linkMessage = `You can find that information on your [${pageName}](${targetUrl}) page.`;
+              }
+              
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                type: 'navigate',
-                targetUrl: targetUrl,
-                message: `Taking you to ${intent.action.replace('navigate_to_', '').replace('_', ' ')}...`
+                type: 'message',
+                content: linkMessage
               })}\n\n`));
               
-              // Add a small delay for navigation
-              await new Promise(resolve => setTimeout(resolve, 100));
             } catch (error) {
               console.error('Error handling navigation intent:', error);
             }
