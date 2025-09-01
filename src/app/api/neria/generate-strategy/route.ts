@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { getValidAccessToken } from '@/utils/googleAuth';
 import { getClient, getCurrentModel } from '@/utils/openai';
+import { getPrompt, renderTemplate } from '@/utils/prompts';
 
 export async function POST(request: Request) {
   try {
@@ -91,20 +92,15 @@ export async function POST(request: Request) {
     // Use OpenAI GPT-4o for strategy generation (reliable and proven)
     const modelConfig = { provider: "openai", model: "gpt-4o" };
     const client = getClient(modelConfig.provider);
-    const strategyPrompt = `You are Neria, a YouTube strategy coach. Based on the user's goals and channel analytics, create a concise strategy.
-
-Channel: ${channelRecord.title}
-Stats: ${channelRecord.subscriber_count?.toLocaleString()} subscribers, ${channelRecord.video_count} videos, ${channelRecord.view_count?.toLocaleString()} views
-
-User's About: ${aboutText || 'Not provided'}
-Recent Video Titles: ${recentTitles.slice(0, 5).join(', ') || 'None available'}
-
-User's Answers:
-${(answers || []).map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n')}
-
-Analytics Summary: ${JSON.stringify(analyticsData).slice(0, 1000)}
-
-IMPORTANT: Write a SHORT strategy with EXACTLY 6 sentences or less. Cover the most important recommendations for content type, upload frequency, and one key improvement. Be concise and actionable. End with: "Do you agree with this plan?"`;
+    const tpl = await getPrompt('strategy_generation');
+    const strategyPrompt = renderTemplate(tpl, {
+      channel_title: channelRecord.title,
+      stats_line: `${channelRecord.subscriber_count?.toLocaleString()} subscribers, ${channelRecord.video_count} videos, ${channelRecord.view_count?.toLocaleString()} views`,
+      about_text: aboutText || 'Not provided',
+      recent_titles: recentTitles.slice(0, 5).join(', ') || 'None available',
+      answers_block: (answers || []).map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n'),
+      analytics_summary: JSON.stringify(analyticsData).slice(0, 1000),
+    });
 
     const completion = await client.chat.completions.create({
       model: modelConfig.model,

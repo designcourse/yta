@@ -18,6 +18,24 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+  const [isAdmin, setIsAdmin] = (require('react') as typeof import('react')).useState(false);
+  (require('react') as typeof import('react')).useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: roleRow } = await supabase
+          .from('google_accounts')
+          .select('role_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+        const { data: roles } = await supabase.from('user_roles').select('id,name');
+        const adminRoleId = roles?.find(r => r.name === 'admin')?.id;
+        setIsAdmin(!!adminRoleId && roleRow?.role_id === adminRoleId);
+      } catch {}
+    })();
+  }, [supabase]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -168,6 +186,18 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
             >
               Thumbnail Content
             </Link>
+            {isAdmin && (
+              <Link
+                href={`/dashboard/${encodeURIComponent(currentChannelId)}/system-prompts`}
+                className={`block text-base ${
+                  isActivePath(`/dashboard/${currentChannelId}/system-prompts`)
+                    ? "text-gray-900 font-medium"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                System Prompts
+              </Link>
+            )}
           </nav>
         )}
       </div>

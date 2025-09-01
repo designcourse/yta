@@ -54,7 +54,7 @@ const DashboardContent: React.FC<DashboardContentProps> = ({
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 ml-[20px]">
+      <div className="flex-1 ml-[20px] h-screen overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#B2B5D1] [&::-webkit-scrollbar-thumb]:rounded-full scrollbar-thin scrollbar-thumb-[#B2B5D1] scrollbar-track-transparent">
         {/* Header with Channel Selector */}
         {showChannelSelector && (
           <header className="h-[104px] flex items-center justify-end px-5">
@@ -67,7 +67,7 @@ const DashboardContent: React.FC<DashboardContentProps> = ({
         )}
 
         {/* Main Content */}
-        <main className={`px-5 ${showChannelSelector ? 'pt-12' : 'pt-20'}`}>
+        <main className={`px-5 ${showChannelSelector ? 'pt-12' : 'pt-20'} pb-12`}>
           {children}
         </main>
       </div>

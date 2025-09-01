@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { getClient, getCurrentModel } from '@/utils/openai';
+import { getPrompt } from '@/utils/prompts';
 
 export async function POST(request: Request) {
   try {
@@ -58,8 +59,8 @@ export async function POST(request: Request) {
       'What are your primary goals for the next 3 months?',
     ];
 
-    // Compose strict instruction
-    const instruction = `You are Naria.\n\nYou need answers to the following questions. If you do not know the answer to these questions, choose which answer is the most important to have answered first, and return a response with the question that you chose.\n\nIf you reach a point where you understand all of these questions, return a response with the number '200'.\n\nAsk these in natural language, as if speaking to the user:\n- In just a couple sentences, tell me what your channel is about.\n- Roughly how much time per week can you commit to working on your channel?\n- What are your primary goals for the next 3 months?\n\nRules:\n- If you can infer an answer from Context, skip that question.\n- Respond with ONLY one of: a single question string (no quotes, no extraneous text), or exactly 200.\n- Do not include explanations or any other text.`;
+    // Compose strict instruction from DB
+    const instruction = await getPrompt('neria_next_question_instruction');
 
     // Provide context of known answers
     const context = {

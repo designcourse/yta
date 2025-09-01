@@ -125,5 +125,5 @@ button, .border {
 }
 
 .planner-card-hover:hover > * {
-  transform: scale(1.02);
+  transform: scale(1.015);
 }

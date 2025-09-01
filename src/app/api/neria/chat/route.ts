@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getClient, getCurrentModel } from "@/utils/openai";
+import { getPrompt } from "@/utils/prompts";
 
 async function analyzeUserIntent(message: string, currentUrl: string, channelId?: string, supabase?: any): Promise<{
   action: 'generate_video_titles' | 'navigate_to_planner' | 'navigate_to_goals' | 'navigate_to_analytics' | 'chat_only' | 'other';
@@ -454,7 +455,7 @@ async function loadRecentMessages(supabase: any, threadId: string, limit = 12) {
   return recent.map((m: any) => ({ role: m.role, content: m.content }));
 }
 
-function buildSystemPrompt(context: {
+async function buildSystemPrompt(context: {
   channelMeta: { title?: string; externalId?: string } | null;
   memoryProfile: any;
   statsSummary: string | null;
@@ -473,20 +474,16 @@ function buildSystemPrompt(context: {
   const titles = context.recentTitles?.length ? `Recent Titles: ${context.recentTitles.slice(0, 6).join(", ")}` : "";
   const strategy = context.strategyPlan ? `Current Strategy Plan (persisted):\n${context.strategyPlan}` : "";
 
+  const base = await getPrompt('neria_chat_system');
   return [
-    "You are Neria, a concise, pragmatic YouTube strategy coach.",
-    "Always ground recommendations in the user's goals, constraints, the specific channel context, and latest stats.",
+    base,
     channelLine,
-    "When you make a suggestion, briefly explain why it matters and the expected impact.",
-    "If a user asks you to generate video titles or video ideas, respond with a brief acknowledgment like 'Working on that for you...' or 'Let me generate some ideas...'. If the user is not already on the /planner page, DO NOT imply redirecting. Instead, include a short, friendly sentence that provides a clickable link to the planner page that the UI supplies. Keep responses brief.",
     profile,
     stats,
     about,
     titles,
     strategy,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 async function generateVideoIdeas(supabase: any, userId: string, channelId: string, customPrompt?: string): Promise<boolean> {
@@ -892,7 +889,7 @@ export async function POST(request: Request) {
 
             // Get current model configuration
         const modelConfig = await getCurrentModelWithSupabase(supabase);
-    const systemPrompt = buildSystemPrompt(pinned);
+    const systemPrompt = await buildSystemPrompt(pinned);
     const history = await loadRecentMessages(supabase, threadId);
 
     // Assemble messages with proper alternation; GPT-4o is the primary chat model

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
+import { getPrompt } from "@/utils/prompts";
 
 // Import shared functions from chat route
 async function getCurrentModel(supabase: any) {
@@ -215,7 +216,7 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
   return { channelId, channelMeta, memoryProfile, statsSummary, aboutText, recentTitles, strategyPlan };
 }
 
-function buildSystemPrompt(context: {
+async function buildSystemPrompt(context: {
   channelMeta: { title?: string; externalId?: string } | null;
   memoryProfile: any;
   statsSummary: string | null;
@@ -233,20 +234,16 @@ function buildSystemPrompt(context: {
   const about = context.aboutText ? `About: ${context.aboutText}` : "";
   const titles = context.recentTitles?.length ? `Recent Titles: ${context.recentTitles.slice(0, 6).join(", ")}` : "";
   const strategy = context.strategyPlan ? `Current Strategy Plan (persisted):\n${context.strategyPlan}` : "";
-
+  const base = await getPrompt('neria_messages_system');
   return [
-    "You are Neria, a concise, pragmatic YouTube strategy coach.",
-    "Always ground recommendations in the user's goals, constraints, the specific channel context, and latest stats.",
+    base,
     channelLine,
-    "When you make a suggestion, briefly explain why it matters and the expected impact.",
     profile,
     stats,
     about,
     titles,
     strategy,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 export async function GET(request: Request) {
@@ -305,7 +302,7 @@ export async function GET(request: Request) {
       try {
         const modelConfig = await getCurrentModel(supabase);
         const pinned = await loadPinnedContext(supabase, user.id, threadId);
-        const systemPrompt = buildSystemPrompt(pinned);
+        const systemPrompt = await buildSystemPrompt(pinned);
         
         // Build the message array as it would be for a new chat request
         const messageArray: Array<{ role: string; content: string }> = [];

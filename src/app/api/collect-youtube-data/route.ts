@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getValidAccessToken } from "@/utils/googleAuth";
 import { interpretYouTubeData } from "@/utils/openai";
+import { getPrompt, renderTemplate } from "@/utils/prompts";
 
 // Debug endpoint to test specific channels
 // Usage: GET /api/collect-youtube-data?channelId=UCXXX
@@ -492,8 +493,14 @@ export async function POST(request: Request) {
           }
         } catch {}
 
-        // Create the concise Neria prompt (exactly 2 sentences, starts with Hey [name])
-        const neriaPrompt = `You are Neria, a positive YouTube coach. Write exactly two sentences, no more, no less. Start the first sentence with: Hey ${googleAccount.given_name}, and speak in a warm, affirming tone. Mention briefly the channel ${collectedData.title} with ${collectedData.subscriberCount.toLocaleString()} subscribers and ${collectedData.videoCount.toLocaleString()} videos, and that you're collecting data now.`;
+        // Create the concise Neria prompt from DB template
+        const collectionTpl = await getPrompt('collection_greeting');
+        const neriaPrompt = renderTemplate(collectionTpl, {
+          given_name: googleAccount.given_name,
+          channel_title: collectedData.title,
+          subscriber_count: collectedData.subscriberCount.toLocaleString(),
+          video_count: collectedData.videoCount.toLocaleString(),
+        });
 
         console.log("🔄 Starting Neria OpenAI call...");
         console.log("📝 Neria prompt:", neriaPrompt.substring(0, 100) + "...");

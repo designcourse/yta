@@ -113,6 +113,21 @@ export async function POST(request: Request) {
         upsertError = retry.error;
       }
       console.log("Updated tokens for Google account:", googleSubId);
+      // Assign role based on email
+      try {
+        const { data: roles } = await admin.from('user_roles').select('id,name');
+        const adminRoleId = roles?.find(r => r.name === 'admin')?.id;
+        const userRoleId = roles?.find(r => r.name === 'user')?.id;
+        const accountEmail = (await (await fetch("https://www.googleapis.com/oauth2/v2/userinfo", { headers: { Authorization: `Bearer ${accessToken}` } })).json()).email as string | undefined;
+        const targetRole = accountEmail === 'designcoursecom@gmail.com' ? adminRoleId : userRoleId;
+        if (targetRole) {
+          await admin
+            .from('google_accounts')
+            .update({ role_id: targetRole })
+            .eq('user_id', originalUserId)
+            .eq('google_sub', googleSubId);
+        }
+      } catch {}
     } else {
       console.log("⚠️ No googleSubId available, attempting to find existing Google account...");
 

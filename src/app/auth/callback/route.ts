@@ -69,6 +69,20 @@ export async function GET(request: Request) {
             upsertError = retry.error;
           }
 
+          // Assign role: admin for designcoursecom@gmail.com else default user
+          try {
+            const { data: roles } = await admin.from('user_roles').select('id,name');
+            const adminRoleId = roles?.find(r => r.name === 'admin')?.id;
+            const userRoleId = roles?.find(r => r.name === 'user')?.id;
+            const targetRole = user.email === 'designcoursecom@gmail.com' ? adminRoleId : userRoleId;
+            if (targetRole) {
+              await admin
+                .from('google_accounts')
+                .update({ role_id: targetRole })
+                .eq('user_id', user.id);
+            }
+          } catch {}
+
           console.log("Stored basic Google account for:", user.email);
 
           // Check if user has channels and redirect accordingly

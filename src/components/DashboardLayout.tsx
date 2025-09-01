@@ -40,7 +40,7 @@ export default async function DashboardLayout({
 
   return (
     <NeriaProvider>
-      <div className="min-h-screen dashboard-layout" style={{ backgroundColor: '#E6E8FC' }}>
+      <div className="min-h-screen dashboard-layout overflow-hidden" style={{ backgroundColor: '#E6E8FC' }}>
         {/* Hide spline canvas */}
         <style dangerouslySetInnerHTML={{
           __html: `

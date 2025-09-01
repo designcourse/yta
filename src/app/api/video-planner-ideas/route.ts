@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getClient, getCurrentModel } from "@/utils/openai";
+import { getPrompt } from "@/utils/prompts";
 
 async function loadChannelContext(supabase: any, userId: string, channelId: string) {
   // Get channel metadata
@@ -62,10 +63,15 @@ async function loadChannelContext(supabase: any, userId: string, channelId: stri
   };
 }
 
-function buildVideoTitlePrompt(context: any): string {
+async function buildVideoTitlePrompt(context: any): Promise<string> {
   const { channelMeta, memoryProfile, latestVideo, aboutText, recentTitles, strategyPlan } = context;
 
-  return `You are Neria, a YouTube strategy coach. Generate 6 compelling YouTube video title ideas for the channel "${channelMeta.title}".
+  const base = await getPrompt('video_planner_titles');
+  const header = `Generate 6 compelling YouTube video title ideas for the channel "${channelMeta.title}".`;
+
+  return `${base}
+
+${header}
 
 CHANNEL CONTEXT:
 - Channel: ${channelMeta.title}
@@ -165,7 +171,7 @@ export async function GET(request: Request) {
     // Use OpenAI GPT-4o for video planning (reliable and creative)
     const modelConfig = { provider: "openai", model: "gpt-4o" };
     const client = getClient(modelConfig.provider);
-    const prompt = buildVideoTitlePrompt(context);
+    const prompt = await buildVideoTitlePrompt(context);
 
     const completion = await client.chat.completions.create({
       model: modelConfig.model,
@@ -265,7 +271,7 @@ export async function POST(request: Request) {
     // Use OpenAI GPT-4o for video planning (reliable and creative)
     const modelConfig = { provider: "openai", model: "gpt-4o" };
     const client = getClient(modelConfig.provider);
-    let prompt = buildVideoTitlePrompt(context);
+    let prompt = await buildVideoTitlePrompt(context);
     
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
     if (customPrompt) {
