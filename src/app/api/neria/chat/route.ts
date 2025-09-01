@@ -134,26 +134,66 @@ async function getCurrentModelWithSupabase(supabase: any) {
 }
 
 function countTokens(messages: Array<{ role: string; content: string }>, model: string): number {
-  // More accurate fallback estimation for OpenAI models
-  // Based on empirical data: ~3.5-4 characters per token for English text
-  let totalTokens = 0;
+  // Calculate total character length for debugging
+  const totalChars = messages.reduce((acc, msg) => acc + msg.role.length + msg.content.length, 0);
+  console.log(`Token counting - Model: ${model}, Messages: ${messages.length}, Total chars: ${totalChars}`);
   
-  for (const message of messages) {
-    // Base tokens per message (OpenAI format overhead)
-    totalTokens += 4; // <|start|>{role}<|message|> overhead
+  try {
+    // Use tiktoken for accurate token counting when available
+    const { encoding_for_model } = require('tiktoken');
     
-    // Count tokens for role and content
-    const roleTokens = Math.ceil(message.role.length / 3.5);
-    const contentTokens = Math.ceil(message.content.length / 3.5);
+    // Map models to their appropriate tiktoken encodings
+    let encodingName = 'cl100k_base'; // Default for GPT-4/GPT-3.5
     
-    totalTokens += roleTokens + contentTokens;
+    if (model.includes('gpt-4')) {
+      encodingName = 'cl100k_base';
+    } else if (model.includes('gpt-3.5')) {
+      encodingName = 'cl100k_base';
+    } else if (model.includes('sonar') || model.includes('llama')) {
+      // Perplexity models typically use similar tokenization to GPT-4
+      encodingName = 'cl100k_base';
+    }
+    
+    const encoding = encoding_for_model(encodingName as any);
+    let totalTokens = 0;
+    
+    for (const message of messages) {
+      // Count tokens for the message format: role + content
+      totalTokens += 4; // Message formatting overhead
+      totalTokens += encoding.encode(message.role).length;
+      totalTokens += encoding.encode(message.content).length;
+    }
+    
+    // Additional tokens for assistant response priming
+    totalTokens += 3;
+    
+    encoding.free(); // Clean up memory
+    console.log(`Token counting - Tiktoken result: ${totalTokens} tokens`);
+    return totalTokens;
+    
+  } catch (error) {
+    console.warn('Tiktoken failed, falling back to character estimation:', error);
+    
+    // Improved fallback calculation with better estimates
+    let totalTokens = 0;
+    
+    for (const message of messages) {
+      // More accurate character-per-token estimates based on empirical data
+      // OpenAI/Perplexity models: ~3.3-3.7 chars per token for English text
+      totalTokens += 4; // Message overhead
+      totalTokens += Math.ceil(message.role.length / 3.3);
+      totalTokens += Math.ceil(message.content.length / 3.3);
+    }
+    
+    totalTokens += 3; // Response priming
+    
+    // Ensure we don't severely underestimate
+    const minTokensFromChars = Math.ceil(totalChars / 3.0); // Conservative estimate
+    totalTokens = Math.max(totalTokens, minTokensFromChars);
+    
+    console.log(`Token counting - Fallback result: ${totalTokens} tokens (from ${totalChars} chars)`);
+    return totalTokens;
   }
-  
-  // Additional tokens for assistant response priming
-  totalTokens += 3;
-  
-  // Add a small buffer for potential variations
-  return Math.ceil(totalTokens * 1.1);
 }
 
 type ChatPostBody = {

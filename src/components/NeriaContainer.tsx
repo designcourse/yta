@@ -587,7 +587,7 @@ const NeriaContainer: React.FC = () => {
 
             {/* Message Container */}
             {!isMinimized && (
-              <div className="flex-1 overflow-y-auto space-y-4">
+              <div className="flex-1 overflow-y-auto space-y-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-transparent scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
                 {initialLoading && (
                   <div className="text-white/70 text-sm">Loading conversation…</div>
                 )}
