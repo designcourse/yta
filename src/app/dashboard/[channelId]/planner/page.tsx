@@ -372,17 +372,18 @@ export default function PlannerPage({
               <button
                 key={idea.id}
                 onClick={() => handleCardClick(idea.id)}
-                className="bg-white rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 text-left"
+                className="transition-all duration-300 text-left planner-card-hover"
                 style={{ minWidth: '300px' }}
                 disabled={generating || isGeneratingFromChat}
               >
-                {/* Thumbnail Image */}
-                <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
-                  <span className="text-gray-500">Thumbnail Preview</span>
-                </div>
+                <div className="bg-white rounded-lg overflow-hidden">
+                  {/* Thumbnail Image */}
+                  <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
+                    <span className="text-gray-500">Thumbnail Preview</span>
+                  </div>
 
-                {/* Card Content */}
-                <div className="p-4 flex items gap-4">
+                  {/* Card Content */}
+                  <div className="p-4 flex items gap-4">
                   {/* Channel Avatar */}
                   <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
                     {getChannelAvatar() ? (
@@ -411,6 +412,7 @@ export default function PlannerPage({
                       {channelData?.title || 'DesignCourse'}
                     </p>
                   </div>
+                </div>
                 </div>
               </button>
             ))}
