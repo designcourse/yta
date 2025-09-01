@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { usePathname } from 'next/navigation';
 import { useNeria } from './NeriaContext';
 import DashboardSidebar from './DashboardSidebar';
 import ChannelSelector from './ChannelSelector';
@@ -21,6 +22,18 @@ const DashboardContent: React.FC<DashboardContentProps> = ({
   basePath = "/dashboard"
 }) => {
   const { isFullscreen, setCurrentChannelId } = useNeria();
+  const pathname = usePathname();
+
+  // Derive basePath for ChannelSelector from current pathname if it contains a known section
+  const derivedBasePath = React.useMemo(() => {
+    if (!pathname) return basePath;
+    // Match /dashboard/:channelId/<section>
+    const match = pathname.match(/^\/dashboard\/[^/]+\/(.+)$/);
+    if (match && match[1]) {
+      return `/dashboard/[channelId]/${match[1]}`;
+    }
+    return basePath;
+  }, [pathname, basePath]);
 
   React.useEffect(() => {
     console.log('DashboardContent: Setting currentChannelId to:', currentChannelId);
@@ -48,7 +61,7 @@ const DashboardContent: React.FC<DashboardContentProps> = ({
             <ChannelSelector 
               channels={channels}
               currentChannelId={currentChannelId}
-              basePath={basePath}
+              basePath={derivedBasePath}
             />
           </header>
         )}

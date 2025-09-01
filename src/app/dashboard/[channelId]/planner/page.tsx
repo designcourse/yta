@@ -1,4 +1,3 @@
-import DashboardLayout from "@/components/DashboardLayout";
 import PlannerClient from "../../../../components/PlannerClient";
 
 export default async function PlannerPage({ params }: { params: Promise<{ channelId: string }> }) {
@@ -6,8 +5,6 @@ export default async function PlannerPage({ params }: { params: Promise<{ channe
   const channelId = resolvedParams.channelId;
 
   return (
-    <DashboardLayout channelId={channelId} basePath="/dashboard/[channelId]/planner">
-      <PlannerClient channelId={channelId} />
-    </DashboardLayout>
+    <PlannerClient channelId={channelId} />
   );
 }

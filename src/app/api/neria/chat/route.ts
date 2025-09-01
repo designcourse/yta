@@ -359,17 +359,17 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
         .order("created_at", { ascending: true });
       
       if (answers && answers.length > 0) {
-        const goalsAnswer = answers.find(a => 
+        const goalsAnswer = answers.find((a: { question?: string; answer?: string }) => 
           a.question && (a.question.toLowerCase().includes('goals') || 
           a.question.toLowerCase().includes('primary goals'))
         )?.answer || '';
         
-        const timeAnswer = answers.find(a => 
+        const timeAnswer = answers.find((a: { question?: string; answer?: string }) => 
           a.question && (a.question.toLowerCase().includes('time') || 
           a.question.toLowerCase().includes('commit'))
         )?.answer || '';
         
-        const aboutAnswer = answers.find(a => 
+        const aboutAnswer = answers.find((a: { question?: string; answer?: string }) => 
           a.question && (a.question.toLowerCase().includes('about') || 
           a.question.toLowerCase().includes('channel is about'))
         )?.answer || '';

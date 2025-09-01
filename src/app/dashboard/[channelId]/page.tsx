@@ -1,4 +1,3 @@
-import DashboardLayout from "@/components/DashboardLayout";
 import YouTubeStats from "@/components/YouTubeStats";
 
 export default async function ChannelDashboardPage({
@@ -10,8 +9,6 @@ export default async function ChannelDashboardPage({
   const channelId = resolvedParams.channelId;
 
   return (
-    <DashboardLayout channelId={channelId}>
-      <YouTubeStats channelId={decodeURIComponent(channelId)} />
-    </DashboardLayout>
+    <YouTubeStats channelId={decodeURIComponent(channelId)} />
   );
 }
