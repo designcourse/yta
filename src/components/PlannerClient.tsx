@@ -27,6 +27,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
   const searchParams = useSearchParams();
   const [videoIdeas, setVideoIdeas] = useState<VideoIdeaData[]>([]);
   const [channelData, setChannelData] = useState<ChannelData | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -195,6 +196,11 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
     return null;
   };
 
+  // Reset avatar error state when the channel changes or the selected avatar URL changes
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [channelData]);
+
   const lastGenerated = videoIdeas.length > 0
     ? videoIdeas.reduce((latest, idea) => {
         const t = new Date(idea.created_at).toISOString();
@@ -260,11 +266,15 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
 
                 <div className="p-4 flex items gap-4">
                   <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
-                    {getChannelAvatar() ? (
+                    {getChannelAvatar() && !avatarFailed ? (
                       <img 
-                        src={getChannelAvatar()!} 
+                        src={getChannelAvatar()!}
                         alt={`${channelData?.title} avatar`}
                         className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
+                        onError={() => setAvatarFailed(true)}
                       />
                     ) : (
                       <div className="w-full h-full bg-gray-300 flex items-center justify-center">
