@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import ClientDashboardLayout from "@/components/ClientDashboardLayout";
+import RefreshContainer from "@/components/RefreshContainer";
 
 interface VideoIdeaData {
   id: string;
@@ -253,17 +254,7 @@ export default function PlannerPage({
     };
   }, [channelId]);
 
-  const handleGenerateMore = async () => {
-    setGenerating(true);
-    setFadeOut(true);
-    
-    // Add slight delay for fade out effect
-    setTimeout(async () => {
-      await fetchVideoIdeas(true);
-      setFadeOut(false);
-      setGenerating(false);
-    }, 300);
-  };
+  // Remove old Generate More handler (replaced by RefreshContainer)
 
   const handleCardClick = (ideaId: string) => {
     // TODO: Handle card selection and navigate to next step
@@ -307,30 +298,37 @@ export default function PlannerPage({
     return <div>Loading...</div>;
   }
 
+  // Compute last generated timestamp from ideas
+  const lastGenerated = videoIdeas.length > 0
+    ? videoIdeas.reduce((latest, idea) => {
+        const t = new Date(idea.created_at).toISOString();
+        return t > latest ? t : latest;
+      }, new Date(videoIdeas[0].created_at).toISOString())
+    : undefined;
+
+  const handleRefresh = () => {
+    // Trigger regeneration using the same path as Generate more
+    setGenerating(true);
+    setFadeOut(true);
+    setTimeout(async () => {
+      await fetchVideoIdeas(true);
+      setFadeOut(false);
+      setGenerating(false);
+    }, 300);
+  };
+
   return (
     <ClientDashboardLayout 
       channelId={channelId}
       basePath="/dashboard/[channelId]/planner"
     >
       <div className="space-y-15">
-        {/* Generate More CTA */}
-        <button 
-          onClick={handleGenerateMore}
-          disabled={generating || isGeneratingFromChat}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity disabled:opacity-50"
-        >
-          <svg className={`w-5 h-5 ${(generating || isGeneratingFromChat) ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none">
-            <path 
-              d="M12 2V6M12 18V22M4.93 4.93L7.76 7.76M16.24 16.24L19.07 19.07M2 12H6M18 12H22M4.93 19.07L7.76 16.24M16.24 7.76L19.07 4.93" 
-              stroke="currentColor" 
-              strokeWidth="2" 
-              strokeLinecap="round"
-            />
-          </svg>
-          <span className="text-[22px] text-gray-900">
-            {(generating || isGeneratingFromChat) ? 'Generating...' : 'Generate more'}
-          </span>
-        </button>
+        {/* Refresh + Last Updated (consistent with latest-video) */}
+        <RefreshContainer 
+          lastUpdated={lastGenerated}
+          onRefresh={handleRefresh}
+          isLoading={isLoading || generating || isGeneratingFromChat}
+        />
 
         {/* Error State */}
         {error && (
@@ -424,7 +422,7 @@ export default function PlannerPage({
           <div className="text-center py-12">
             <p className="text-gray-600 mb-4">No video ideas generated yet.</p>
             <button
-              onClick={handleGenerateMore}
+              onClick={handleRefresh}
               disabled={generating || isGeneratingFromChat}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
             >

@@ -159,11 +159,11 @@ export async function getCurrentModel() {
     .single();
 
   if (!settings?.current_model_id) {
-    // Fallback to default perplexity
+    // Fallback to default OpenAI GPT-4o for primary chat
     return {
-      provider: "perplexity",
-      model: "llama-3.1-sonar-large-128k-online",
-      max_input_tokens: 127072,
+      provider: "openai",
+      model: "gpt-4o",
+      max_input_tokens: 128000,
       max_output_tokens: 8192,
     };
   }
@@ -175,9 +175,9 @@ export async function getCurrentModel() {
     .single();
 
   return modelProvider || {
-    provider: "perplexity",
-    model: "llama-3.1-sonar-large-128k-online",
-    max_input_tokens: 127072,
+    provider: "openai",
+    model: "gpt-4o",
+    max_input_tokens: 128000,
     max_output_tokens: 8192,
   };
 }

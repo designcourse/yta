@@ -9,8 +9,10 @@ async function analyzeUserIntent(message: string, currentUrl: string, channelId?
   targetUrl?: string;
   reasoning?: string;
 }> {
-  const modelConfig = supabase ? await getCurrentModelWithSupabase(supabase) : { provider: "perplexity", model: "sonar-pro" };
-  const client = getClient(modelConfig.provider);
+  // Always use GPT-4o for intent analysis to keep Neria's behavior consistent
+  const client = getClient('openai');
+  const intentModel = 'gpt-4o';
+  console.log('[Neria][Intent] Analyzing user intent', { messageSnippet: message.slice(0, 120), currentUrl, channelId });
   
   const intentPrompt = `You are Neria, a YouTube strategy assistant. Analyze this user request and determine what action should be taken.
 
@@ -65,12 +67,8 @@ For navigation actions, use these target URLs:
 - navigate_to_planner: "/dashboard/${channelId || '{channelId}'}/planner"`;
 
   try {
-    // Get current model configuration
-    const modelConfig = await getCurrentModelWithSupabase(supabase);
-    const client = getClient(modelConfig.provider);
-    
     const completion = await client.chat.completions.create({
-      model: modelConfig.model,
+      model: intentModel,
       messages: [
         { role: 'system', content: intentPrompt },
         { role: 'user', content: 'Analyze the user request and respond with the action JSON.' }
@@ -80,16 +78,26 @@ For navigation actions, use these target URLs:
     });
 
     const response = completion.choices?.[0]?.message?.content?.trim() || '{}';
-    console.log('AI intent analysis response:', response);
+    console.log('[Neria][Intent] Raw intent response:', response);
     
-    const intent = JSON.parse(response);
+    // Accept raw JSON or fenced ```json blocks
+    let jsonText = response.replace(/```json|```/g, '').trim();
+    // If still not pure JSON, try to slice between first { and last }
+    if (!(jsonText.startsWith('{') && jsonText.endsWith('}'))) {
+      const start = jsonText.indexOf('{');
+      const end = jsonText.lastIndexOf('}');
+      if (start !== -1 && end !== -1 && end > start) {
+        jsonText = jsonText.slice(start, end + 1);
+      }
+    }
+    const intent = JSON.parse(jsonText);
     
     // Validate the response
     if (!intent.action || !['generate_video_titles', 'navigate_to_planner', 'navigate_to_goals', 'navigate_to_analytics', 'chat_only', 'other'].includes(intent.action)) {
       throw new Error('Invalid action in AI response');
     }
     
-    console.log('Parsed intent:', intent);
+    console.log('[Neria][Intent] Parsed intent:', intent);
     
     return {
       action: intent.action,
@@ -98,7 +106,7 @@ For navigation actions, use these target URLs:
       reasoning: intent.reasoning || 'No reasoning provided'
     };
   } catch (error) {
-    console.error('Error analyzing user intent:', error);
+    console.error('[Neria][Intent] Error analyzing user intent:', error);
     // Fallback to chat_only if AI analysis fails
     return {
       action: 'chat_only',
@@ -115,11 +123,11 @@ async function getCurrentModelWithSupabase(supabase: any) {
     .single();
   
   if (!settings?.current_model_id) {
-    // Fallback to default perplexity
+    // Fallback to OpenAI GPT-4o for primary chat
     return {
-      provider: "perplexity",
-      model: "llama-3.1-sonar-large-128k-online",
-      max_input_tokens: 127072,
+      provider: "openai",
+      model: "gpt-4o",
+      max_input_tokens: 128000,
       max_output_tokens: 8192
     };
   }
@@ -131,9 +139,9 @@ async function getCurrentModelWithSupabase(supabase: any) {
     .single();
 
   return modelProvider || {
-    provider: "perplexity",
-    model: "llama-3.1-sonar-large-128k-online",
-    max_input_tokens: 127072,
+    provider: "openai",
+    model: "gpt-4o",
+    max_input_tokens: 128000,
     max_output_tokens: 8192
   };
 }
@@ -201,6 +209,64 @@ async function countTokens(messages: Array<{ role: string; content: string }>, m
     console.log(`Token counting - Fallback result: ${totalTokens} tokens (from ${totalChars} chars)`);
     return totalTokens;
   }
+}
+
+// Determine if the user's query requires real-time web search (decided by GPT-4o)
+async function shouldUseRealtimeSearch(message: string): Promise<{ needsSearch: boolean; query: string }> {
+  try {
+    console.log('[Neria][Realtime] Detecting need for web search...', { messageSnippet: message.slice(0, 160) });
+    const client = getClient('openai');
+    const completion = await client.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are Neria. Decide if the user query requires real-time web search (news, latest releases, current events, very recent data). Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
+        },
+        { role: 'user', content: message },
+      ],
+      max_tokens: 60,
+      temperature: 0,
+    });
+    const text = completion.choices?.[0]?.message?.content?.trim() || '{}';
+    console.log('[Neria][Realtime] Detection raw response:', text);
+    const parsed = JSON.parse(text);
+    const decision = { needsSearch: !!parsed.needsSearch, query: parsed.query || message };
+    console.log('[Neria][Realtime] Detection decision:', decision);
+    return decision;
+  } catch (e) {
+    console.warn('[Neria][Realtime] Detection failed, defaulting to no search:', e);
+    return { needsSearch: false, query: message };
+  }
+}
+
+// Execute a Perplexity web search and return concise findings and sources
+async function runPerplexitySearch(query: string): Promise<{ content: string; sources?: string[] }> {
+  console.log('[Neria][Realtime] Running Perplexity search...', { query });
+  const client = getClient('perplexity');
+  // Use a valid Perplexity online model
+  const model = 'sonar-pro';
+  const completion = await client.chat.completions.create({
+    model,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are a real-time researcher. Search the web and return a concise synthesis of up-to-date facts with bullet points. Include a short list of source URLs at the end prefixed by Sources:. Keep under 200 words.',
+      },
+      { role: 'user', content: query },
+    ],
+    max_tokens: 500,
+    temperature: 0.2,
+  });
+
+  const content = completion.choices?.[0]?.message?.content || '';
+  // Best-effort source extraction
+  const urlRegex = /(https?:\/\/[^\s)\]]+)/g;
+  const sources = Array.from(new Set(content.match(urlRegex) || [])).slice(0, 8);
+  console.log('[Neria][Realtime] Perplexity search complete', { contentLength: content.length, sourcesCount: sources.length });
+  return { content, sources };
 }
 
 type ChatPostBody = {
@@ -412,7 +478,7 @@ function buildSystemPrompt(context: {
     "Always ground recommendations in the user's goals, constraints, the specific channel context, and latest stats.",
     channelLine,
     "When you make a suggestion, briefly explain why it matters and the expected impact.",
-    "If a user asks you to generate video titles or video ideas, respond with a brief acknowledgment like 'Working on that for you...' or 'Let me generate some ideas...' If they're not already on the planner page, mention you're taking them there. Do NOT give long explanations.",
+    "If a user asks you to generate video titles or video ideas, respond with a brief acknowledgment like 'Working on that for you...' or 'Let me generate some ideas...'. If the user is not already on the /planner page, DO NOT imply redirecting. Instead, include a short, friendly sentence that provides a clickable link to the planner page that the UI supplies. Keep responses brief.",
     profile,
     stats,
     about,
@@ -744,32 +810,22 @@ export async function POST(request: Request) {
           async start(controller) {
             const encoder = new TextEncoder();
             
-            // If user needs to go to planner page, send link instead of redirect
+            // If user is not on planner page, send link message but continue to generate titles
             if (!isOnPlannerPage && intent.requiresRedirect && intent.targetUrl) {
               console.log('User not on planner page, sending planner link');
-              
-              // Generate contextual response with clickable link
               const plannerUrl = `/dashboard/${pinned.channelMeta.externalId}/planner`;
               const promptParam = body.message ? `?prompt=${encodeURIComponent(body.message)}` : '';
               const fullPlannerUrl = plannerUrl + promptParam;
-              
-              const contextualResponse = `I'd be happy to help you generate video titles! To create personalized video ideas for your channel, please visit the [Video Planner](${fullPlannerUrl}) where I can generate titles based on your content strategy and audience.`;
-              
-              // Store the response in database
+              const linkMessage = `I’ll generate the titles now. You can view and manage them in the [Video Planner](${fullPlannerUrl}).`;
+
               await supabase
                 .from("chat_messages")
-                .insert({ thread_id: threadId, role: "assistant", content: contextualResponse });
-              
-              // Send the message with link
+                .insert({ thread_id: threadId, role: "assistant", content: linkMessage });
+
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                 type: 'message',
-                content: contextualResponse
+                content: linkMessage
               })}\n\n`));
-              
-              // End stream
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-              controller.close();
-              return;
             }
             
             // Send starting message  
@@ -839,7 +895,7 @@ export async function POST(request: Request) {
     const systemPrompt = buildSystemPrompt(pinned);
     const history = await loadRecentMessages(supabase, threadId);
 
-    // Assemble messages with proper alternation for Perplexity
+    // Assemble messages with proper alternation; GPT-4o is the primary chat model
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
     messages.push({ role: "system", content: systemPrompt });
     
@@ -880,20 +936,39 @@ export async function POST(request: Request) {
     // Debug log the final message structure
     console.log('Final messages structure:', messages.map(m => ({ role: m.role, contentLength: m.content.length })));
 
-    // Calculate context usage
-    const inputTokens = await countTokens(messages, modelConfig.model);
-    const maxTokens = modelConfig.max_input_tokens - modelConfig.max_output_tokens; // Reserve space for output
+    // Optional: real-time research step
+    let research: { content: string; sources?: string[] } | null = null;
+    const realtimeDecision = await shouldUseRealtimeSearch(body.message);
+    console.log('[Neria][Realtime] Should use search?', realtimeDecision);
+    if (realtimeDecision.needsSearch) {
+      try {
+        research = await runPerplexitySearch(realtimeDecision.query);
+        // Pass research into GPT-4o via an additional system message
+        messages.push({
+          role: 'system',
+          content: `Real-time research findings (for assistant reference):\n${research.content}`,
+        });
+        console.log('[Neria][Realtime] Injected research into GPT-4o context', { injected: true });
+      } catch (e) {
+        console.warn('[Neria][Realtime] Perplexity search failed, continuing without research:', e);
+      }
+    }
+
+    // Calculate context usage using GPT-4o budget
+    const primaryModel = { model: 'gpt-4o', max_input_tokens: 128000, max_output_tokens: 8192 } as const;
+    const inputTokens = await countTokens(messages, primaryModel.model);
+    const maxTokens = primaryModel.max_input_tokens - primaryModel.max_output_tokens; // Reserve space for output
     const contextPercentage = Math.min(100, Math.ceil((inputTokens / maxTokens) * 100));
     
 
 
-    // Call model with streaming
-    const client = getClient(modelConfig.provider);
+    // Call GPT-4o with streaming
+    const client = getClient('openai');
     const stream = await client.chat.completions.create({
-      model: modelConfig.model,
+      model: primaryModel.model,
       messages,
       temperature: 0.4,
-      max_tokens: Math.min(800, modelConfig.max_output_tokens),
+      max_tokens: Math.min(800, primaryModel.max_output_tokens),
       stream: true,
     });
 
@@ -909,12 +984,17 @@ export async function POST(request: Request) {
             type: 'init', 
             threadId, 
             contextPercentage,
-            model: modelConfig.model,
+            model: primaryModel.model,
             inputTokens,
             maxTokens
           };
 
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(initData)}\n\n`));
+
+          // If we performed research, notify the client with a brief event before main streaming
+          if (research) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'realtime_research', content: 'Fetched up-to-date info.' })}\n\n`));
+          }
 
           for await (const chunk of stream) {
             const content = chunk.choices[0]?.delta?.content;
@@ -989,7 +1069,7 @@ export async function POST(request: Request) {
             try {
               const summaryPrompt = "Summarize the conversation so far into a compact brief focusing on user goals, decisions, action items, and unresolved questions. Keep under 200 words.";
               const summaryMsgs = [{ role: "system" as const, content: summaryPrompt }, ...history.slice(-20)];
-              const sum = await client.chat.completions.create({ model: modelConfig.model, messages: summaryMsgs as any, max_tokens: 300, temperature: 0 });
+              const sum = await client.chat.completions.create({ model: primaryModel.model, messages: summaryMsgs as any, max_tokens: 300, temperature: 0 });
               const summaryText = sum.choices?.[0]?.message?.content || null;
               if (summaryText) {
                 await supabase
