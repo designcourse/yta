@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import RefreshContainer from "@/components/RefreshContainer";
 
 interface VideoIdeaData {
@@ -25,7 +25,9 @@ interface ChannelData {
 
 export default function PlannerClient({ channelId }: { channelId: string }) {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [videoIdeas, setVideoIdeas] = useState<VideoIdeaData[]>([]);
+  const [savedPlans, setSavedPlans] = useState<{ id: string; title: string; created_at: string }[]>([]);
   const [channelData, setChannelData] = useState<ChannelData | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -34,6 +36,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
   const [isGeneratingFromChat, setIsGeneratingFromChat] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);
   const redirectHandledRef = useRef(false);
+  const [selectingIdeaId, setSelectingIdeaId] = useState<string | null>(null);
 
   const fetchChannelData = useCallback(async () => {
     if (!channelId) return;
@@ -93,6 +96,17 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
     }
   }, [channelId]);
 
+  const fetchSavedPlans = useCallback(async () => {
+    if (!channelId) return;
+    try {
+      const res = await fetch(`/api/video-plans?channelId=${encodeURIComponent(channelId)}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const plans = (data.plans || []) as { id: string; title: string; created_at: string }[];
+      setSavedPlans(plans);
+    } catch {}
+  }, [channelId]);
+
   useEffect(() => {
     if (channelId) {
       fetchChannelData();
@@ -100,8 +114,9 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
       if (!fromRedirect) {
         fetchVideoIdeas();
       }
+      fetchSavedPlans();
     }
-  }, [channelId, fetchChannelData, fetchVideoIdeas, searchParams]);
+  }, [channelId, fetchChannelData, fetchVideoIdeas, fetchSavedPlans, searchParams]);
 
   useEffect(() => {
     const generating = searchParams.get('generating');
@@ -181,8 +196,29 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
     };
   }, [channelId]);
 
-  const handleCardClick = (ideaId: string) => {
-    console.log('Selected idea:', ideaId);
+  const handleCardClick = async (ideaId: string) => {
+    if (!channelId) return;
+    try {
+      setSelectingIdeaId(ideaId);
+      // Show spinner state immediately
+      setFadeOut(false);
+
+      const res = await fetch('/api/video-plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId, ideaId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to create video plan');
+      }
+      const { planId } = await res.json();
+      // Navigate to the new page
+      router.push(`/dashboard/${encodeURIComponent(channelId)}/planner/video/${encodeURIComponent(planId)}`);
+    } catch (e) {
+      setSelectingIdeaId(null);
+      setError(e instanceof Error ? e.message : 'An error occurred');
+    }
   };
 
   const getChannelAvatar = () => {
@@ -220,6 +256,57 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
 
   return (
     <div className="space-y-15">
+      {savedPlans.length > 0 && (
+        <div className="relative">
+          <div 
+            className={`grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-6 transition-opacity duration-500 ${
+              fadeOut ? 'opacity-30' : 'opacity-100'
+            }`}
+          >
+            {savedPlans.map((plan) => (
+              <button
+                key={plan.id}
+                onClick={() => router.push(`/dashboard/${encodeURIComponent(channelId)}/planner/video/${encodeURIComponent(plan.id)}`)}
+                className="transition-all duration-300 text-left planner-card-hover"
+                style={{ minWidth: '300px' }}
+              >
+                <div className="bg-white rounded-lg overflow-hidden">
+                  <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
+                    <span className="text-gray-500">Thumbnail Preview</span>
+                  </div>
+                  <div className="p-4 flex items gap-4">
+                    <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
+                      {getChannelAvatar() && !avatarFailed ? (
+                        <img 
+                          src={getChannelAvatar()!}
+                          alt={`${channelData?.title} avatar`}
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          decoding="async"
+                          onError={() => setAvatarFailed(true)}
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gray-300 flex items-center justify-center">
+                          <span className="text-white font-medium text-sm">
+                            {channelData?.title?.charAt(0) || '?'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-base font-bold text-gray-900 mb-1 leading-tight min-h-[2.5rem] flex items-start">
+                        <span className="line-clamp-2">{plan.title}</span>
+                      </h3>
+                      <p className="text-base text-gray-600">{channelData?.title || 'DesignCourse'}</p>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <RefreshContainer 
         lastUpdated={lastGenerated}
         onRefresh={handleRefresh}
@@ -260,8 +347,14 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
               disabled={generating || isGeneratingFromChat}
             >
               <div className="bg-white rounded-lg overflow-hidden">
-                <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
-                  <span className="text-gray-500">Thumbnail Preview</span>
+                <div className="w-full h-[221px] flex items-center justify-center relative" style={{ backgroundColor: '#D7D9F2' }}>
+                  {(selectingIdeaId === idea.id) ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                    </div>
+                  ) : (
+                    <span className="text-gray-500">Thumbnail Preview</span>
+                  )}
                 </div>
 
                 <div className="p-4 flex items gap-4">
