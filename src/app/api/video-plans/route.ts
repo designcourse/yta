@@ -104,7 +104,7 @@ export async function GET(request: Request) {
     if (id) {
       const { data: plan, error } = await supabase
         .from("video_plans")
-        .select("id, title, summary, created_at, updated_at, channel_id, idea_id")
+        .select("id, title, summary, created_at, updated_at, channel_id, idea_id, thumbnail_url, thumbnail_selected_at")
         .eq("id", id)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -125,7 +125,7 @@ export async function GET(request: Request) {
 
     const { data: plans, error: listErr } = await supabase
       .from("video_plans")
-      .select("id, title, summary, created_at, updated_at")
+      .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at")
       .eq("user_id", user.id)
       .eq("channel_id", ch.id)
       .order("created_at", { ascending: false });

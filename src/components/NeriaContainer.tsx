@@ -45,7 +45,7 @@ function parseMarkdownLinks(text: string): React.ReactElement {
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
-  const { isFullscreen, setIsFullscreen, currentChannelId } = useNeria();
+  const { isFullscreen, setIsFullscreen, currentChannelId, isOverlayActive } = useNeria();
   
   // Position and size state for when in fullscreen/absolute mode
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -546,7 +546,7 @@ const NeriaContainer: React.FC = () => {
       )}
 
       {/* Main Neria Container - Dark Theme */}
-      <div className={`h-full flex flex-col rounded-md ${isFullscreen ? 'p-4' : ''} ${(sending || initialLoading) ? 'neria-loading-border' : ''}`} style={{ backgroundColor: '#313344', boxShadow: '-26px 4px 42px 0px #ADAFCA' }}>
+      <div className={`h-full flex flex-col rounded-md ${isFullscreen ? 'p-4' : ''} ${((sending || initialLoading) || isOverlayActive) ? 'neria-loading-border' : ''}`} style={{ backgroundColor: '#313344', boxShadow: isOverlayActive ? 'none' : '-26px 4px 42px 0px #ADAFCA' }}>
         
         {/* Neria Chat Area */}
         <div className="flex-1" style={{ height: 'calc(100% - 120px)' }}>

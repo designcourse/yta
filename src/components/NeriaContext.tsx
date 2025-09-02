@@ -7,6 +7,8 @@ interface NeriaContextType {
   setIsFullscreen: (isFullscreen: boolean) => void;
   currentChannelId?: string;
   setCurrentChannelId: (id?: string) => void;
+  isOverlayActive: boolean;
+  setIsOverlayActive: (active: boolean) => void;
 }
 
 const NeriaContext = createContext<NeriaContextType | undefined>(undefined);
@@ -26,9 +28,10 @@ interface NeriaProviderProps {
 export const NeriaProvider: React.FC<NeriaProviderProps> = ({ children }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentChannelId, setCurrentChannelId] = useState<string | undefined>(undefined);
+  const [isOverlayActive, setIsOverlayActive] = useState<boolean>(false);
 
   return (
-    <NeriaContext.Provider value={{ isFullscreen, setIsFullscreen, currentChannelId, setCurrentChannelId }}>
+    <NeriaContext.Provider value={{ isFullscreen, setIsFullscreen, currentChannelId, setCurrentChannelId, isOverlayActive, setIsOverlayActive }}>
       {children}
     </NeriaContext.Provider>
   );

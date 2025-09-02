@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.879.0",
+    "@aws-sdk/s3-request-presigner": "^3.879.0",
     "@splinetool/react-spline": "^4.1.0",
     "@splinetool/runtime": "^1.10.51",
     "@supabase/ssr": "^0.7.0",

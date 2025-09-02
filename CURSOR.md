@@ -380,3 +380,13 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - **Thread Association**: Fixed channel ID resolution for proper context loading in chat threads
 - **Context Loading**: Streamlined context retrieval across page loads and message history
 - **Error Handling**: Improved debugging and error resolution for model configuration and context calculation
+
+### Video Planner Feature Implementation
+- Created `video_plans` table in Supabase for storing selected video ideas with AI-generated summaries.
+- Added system prompt for 3-sentence video elaborations.
+- Implemented `/api/video-plans` for creating, fetching, and listing video plans.
+- Updated PlannerClient to show spinner on idea click, create plan, and navigate to new page.
+- Added saved plans section above Refresh on /planner, with cards linking back to individual pages.
+- Created new page `/dashboard/[channelId]/planner/video/[planId]` to display single video card with summary, including channel avatar and name.
+- UI tweaks: fixed widths, gaps, removed summary header.
+- Implemented thumbnail generation system: Amazon S3 integration with presigned upload/download endpoints, new reference_photos table, dynamic ThumbnailPicker and configurable modal UI with dropdowns and horizontal scroll.

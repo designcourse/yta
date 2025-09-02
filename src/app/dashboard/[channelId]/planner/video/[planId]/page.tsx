@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
+import ThumbnailPicker from "@/components/ThumbnailPicker";
 
 export default async function VideoPlanPage({ params }: { params: Promise<{ channelId: string; planId: string }> }) {
   const { channelId, planId } = await params;
@@ -9,7 +10,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
 
   const { data: plan } = await supabase
     .from("video_plans")
-    .select("id, title, summary, created_at, updated_at")
+    .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at")
     .eq("id", planId)
     .eq("user_id", user!.id)
     .maybeSingle();
@@ -30,9 +31,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
       <div className="relative">
         <div className="grid grid-cols-[380px_1fr] gap-[50px]">
           <div className="bg-white rounded-lg overflow-hidden max-w-[380px]">
-            <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
-              <span className="text-gray-500">Thumbnail Preview</span>
-            </div>
+            <ThumbnailPicker thumbnailUrl={(plan as any)?.thumbnail_url || null} />
             <div className="p-4 flex items gap-4">
               <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
                 {avatarUrl ? (
