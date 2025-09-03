@@ -326,6 +326,8 @@ const NeriaContainer: React.FC = () => {
         }
         return;
       }
+
+      // Let the server/LLM decide intent; no client keyword routing
       console.log('Sending Neria message:', {
         channelId: currentChannelId,
         threadId,
@@ -419,8 +421,18 @@ const NeriaContainer: React.FC = () => {
                     detail: { message: data.message }
                   });
                   window.dispatchEvent(event);
+                } else if (data.type === 'script_generating') {
+                  // Planner script generation started
+                  const ev = new CustomEvent('script-generating');
+                  window.dispatchEvent(ev);
+                } else if (data.type === 'script_generated') {
+                  const ev = new CustomEvent('script-generated');
+                  window.dispatchEvent(ev);
                 } else if (data.type === 'error') {
                   console.error('Streaming error:', data.error);
+                  // Notify listeners to stop any loaders
+                  const ev = new CustomEvent('script-error');
+                  window.dispatchEvent(ev);
                   break;
                 }
               } catch (parseError) {

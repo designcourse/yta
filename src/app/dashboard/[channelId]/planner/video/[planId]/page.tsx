@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
 import ThumbnailPicker from "@/components/ThumbnailPicker";
+import ScriptContainer from "@/components/ScriptContainer";
 
 export default async function VideoPlanPage({ params }: { params: Promise<{ channelId: string; planId: string }> }) {
   const { channelId, planId } = await params;
@@ -63,6 +64,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
             <p className="text-gray-800 whitespace-pre-line">{plan?.summary || 'Generating...'}</p>
           </div>
         </div>
+        <ScriptContainer planId={planId} />
       </div>
     </div>
   );

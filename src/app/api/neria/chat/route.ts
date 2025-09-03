@@ -982,7 +982,7 @@ export async function POST(request: Request) {
     // Load context FIRST to check for video generation intent
     const pinned = await loadPinnedContext(supabase, user.id, threadId);
     
-    // Analyze user intent immediately to see if this is a video generation request
+    // Analyze user intent immediately to see if this is a video/script generation or planner action request
     if (pinned.channelId && pinned.channelMeta?.externalId) {
       const intent = await analyzeUserIntent(
         body.message, 
@@ -1073,6 +1073,94 @@ export async function POST(request: Request) {
           }
         });
         
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        });
+      }
+      // Server-side script generation flow via SSE, so UI can listen without client keyword hacks
+      if ((body.currentUrl || '').includes('/planner/video/')) {
+        // We are on a specific video planning page; ask the LLM to decide if this is a script request
+        const stream = new ReadableStream({
+          async start(controller) {
+            const encoder = new TextEncoder();
+            try {
+              // Ask OpenAI to classify whether this is a script/flow request and extract constraints
+              const client = getClient('openai');
+              const classify = await client.chat.completions.create({
+                model: 'gpt-4o',
+                messages: [
+                  { role: 'system', content: 'You classify requests on a planner video page. Decide if the user is asking to CREATE or REGENERATE a structured video script/flow/guide/outline/storyboard. Consider synonyms like "guide", "outline", "flow", "sections", "script", "structure", "beats", "storyboard". If the user mentions duration or number of sections, capture them. Return STRICT JSON only: {"is_script": boolean, "duration_minutes": number|null, "sections": number|null}. Set is_script=true when any of these intents/synonyms appear or when the user asks to regenerate/replace a script.' },
+                  { role: 'user', content: body.message }
+                ],
+                max_tokens: 150,
+                temperature: 0
+              });
+              let raw = classify.choices?.[0]?.message?.content?.trim() || '{}';
+              raw = raw.replace(/```json|```/g, '').trim();
+              let parsed: any = {};
+              try { parsed = JSON.parse(raw); } catch {}
+              const isScript = !!parsed?.is_script;
+              const desiredMinutes = Number(parsed?.duration_minutes) || undefined;
+              const desiredSections = Number(parsed?.sections) || undefined;
+
+              if (!isScript) {
+                // Not a script request; continue with normal chat: emit nothing special
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'message', content: 'Got it. I will respond in chat.' })}\n\n`));
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                controller.close();
+                return;
+              }
+
+              // Emit generation start so UI can show loader
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'script_generating' })}\n\n`));
+
+              // Resolve plan id from URL path on client; we do not trust client state, so fetch last message context
+              // We do not have planId here; instruct client to include it via URL path. Extract from currentUrl
+              const urlMatch = (body.currentUrl || '').match(/planner\/video\/([^/]+)/);
+              const planId = urlMatch ? urlMatch[1] : undefined;
+              if (!planId) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Unable to determine planId from URL' })}\n\n`));
+                controller.close();
+                return;
+              }
+
+              // Trigger server-side script generation API (it replaces existing script if any)
+              try {
+                // Call internal API with absolute origin derived from request
+                const origin = new URL(request.url).origin;
+                const res = await fetch(`${origin}/api/scripts`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'cookie': request.headers.get('cookie') || '' },
+                  body: JSON.stringify({ planId, prompt: body.message, desiredMinutes, sectionsRequested: desiredSections })
+                });
+                if (!res.ok) {
+                  const err = await res.json().catch(() => ({}));
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.error || 'Script generation failed' })}\n\n`));
+                  controller.close();
+                  return;
+                }
+              } catch (e) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Script generation request failed' })}\n\n`));
+                controller.close();
+                return;
+              }
+
+              // Inform UI to refresh script
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'script_generated' })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+              controller.close();
+            } catch (e) {
+              console.error('Script generation flow failed:', e);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Script generation failed' })}\n\n`));
+              controller.close();
+            }
+          }
+        });
+
         return new Response(stream, {
           headers: {
             'Content-Type': 'text/event-stream',
