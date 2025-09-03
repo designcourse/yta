@@ -86,7 +86,7 @@ async function callGeminiGenerate({ prompt, textInThumbnail, imagesBase64, force
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, textInThumbnail, referencePhotoIds, channelId } = body as { prompt: string; textInThumbnail?: string; referencePhotoIds: string[]; channelId: string; };
+    const { prompt, textInThumbnail, referencePhotoIds, channelId, editFileKey } = body as { prompt: string; textInThumbnail?: string; referencePhotoIds: string[]; channelId: string; editFileKey?: string };
     if (!prompt || !channelId) return NextResponse.json({ error: 'prompt and channelId required' }, { status: 400 });
 
     const supabase = await createSupabaseServerClient();
@@ -136,6 +136,28 @@ export async function POST(request: Request) {
         imagePayload.push({ data: b64, mimeType: it.content_type || 'image/jpeg' });
       } catch (e) {
         console.warn('S3 getObject failed', it.file_key, e);
+      }
+    }
+
+    // If editing an already generated image, include it as the first image for multi-turn editing
+    if (editFileKey) {
+      try {
+        const out = await s3.send(new GetObjectCommand({ Bucket, Key: editFileKey }));
+        // @ts-ignore
+        const bodyStream = out.Body;
+        if (bodyStream) {
+          const chunks: Uint8Array[] = [];
+          // @ts-ignore
+          for await (const chunk of bodyStream) {
+            chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk));
+          }
+          const buf = Buffer.concat(chunks);
+          const b64 = buf.toString('base64');
+          const mimeType = (out as any)?.ContentType || 'image/png';
+          imagePayload.unshift({ data: b64, mimeType });
+        }
+      } catch (e) {
+        console.warn('S3 getObject failed for editFileKey', editFileKey, e);
       }
     }
 

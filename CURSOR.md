@@ -395,11 +395,18 @@ GOOGLE_CLIENT_SECRET=[google_client_secret]
 - Adds a thumbnail creation modal on `/planner/video/[planId]` with Neria "Thumbnail Mode" guidance; normal chat is disabled and prompts route to Gemini 2.5 Flash Image Preview (aka Nano Banana).
 - Users can select up to 3 reference photos (animated border when selected) and enter "Text in Thumbnail" (textfield styled like a dropdown). Delete (circled X) on hover for both reference photos and generated thumbnails.
 - Image generation enforces a 16:9 aspect ratio, combines/edits reference images (not copy-only), shows a spinner during generation, and displays results in the modal with zoom-on-click.
-- Selecting "Yes" on a generated image uploads to S3 and saves via Supabase, associates with the video plan, closes the modal, and replaces the "Choose Thumbnail" button. Planner overview now renders the selected `thumbnail_url` in the saved plans grid.
+- Selecting "Use this thumbnail" on an image uploads to S3 and saves via Supabase, associates with the video plan, closes the modal, and replaces the "Choose Thumbnail" button. Planner overview now renders the selected `thumbnail_url` in the saved plans grid.
 - Limits to 10 saved thumbnails per video. Fresh presigned URLs are used to render images.
 
+#### Iterative editing via Neria (multi-turn image editing)
+- After a generation, Neria now responds: "How about this? If you want to make any changes to this image, just tell me what to change below. Otherwise, click the Use this thumbnail button below."
+- Users can keep chatting edits (e.g., "make him wear a very feminine dress"). The chat sends the new prompt to `POST /api/gemini/generate-thumbnail` along with `editFileKey` for the currently previewed image so Gemini modifies the latest result rather than starting from scratch.
+- When the edited image is returned, the full-screen modal swaps to the new image immediately. To avoid transient 403s on public S3 URLs, the modal first fetches a presigned GET URL for the new `fileKey` and uses that for the zoom view.
+- A lightweight `thumbnail-zoom-update` custom event bridges chat → modal; payload includes `{ fileKey, url }`.
+- The Yes/No prompt is removed. Both the chat panel and the modal show a single CTA: "Use this thumbnail".
+
 APIs
-- `POST /api/gemini/generate-thumbnail` (Gemini call, S3 upload, DB save to `video_thumbnails`)
+- `POST /api/gemini/generate-thumbnail` (Gemini call, S3 upload, DB save to `video_thumbnails`; request body supports `editFileKey` to enable iterative editing of the last image)
 - `GET/DELETE /api/video-thumbnails` (list/delete generated thumbnails, enforce 10 limit)
 - `DELETE /api/reference-photos` (remove S3 object + DB row)
 - `PUT /api/video-plans` (persist selected `thumbnail_url` + `thumbnail_selected_at`)

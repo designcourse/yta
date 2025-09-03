@@ -34,6 +34,35 @@ export default function ThumbnailModal() {
     load();
   }, [channelId]);
 
+  // Listen for zoom image updates from NeriaContainer after an edit
+  useEffect(() => {
+    const handler = async (e: any) => {
+      try {
+        const fileKey = e?.detail?.fileKey;
+        const fallbackUrl = e?.detail?.url;
+        if (fileKey) {
+          const res = await fetch(`/api/s3-presign-get?key=${encodeURIComponent(fileKey)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setZoomImageUrl(data.url || fallbackUrl);
+            setSelectedThumbnailUrl(data.url || fallbackUrl);
+          } else if (fallbackUrl) {
+            setZoomImageUrl(fallbackUrl);
+            setSelectedThumbnailUrl(fallbackUrl);
+          }
+        } else if (fallbackUrl) {
+          setZoomImageUrl(fallbackUrl);
+          setSelectedThumbnailUrl(fallbackUrl);
+        }
+      } catch {
+        const fallbackUrl = e?.detail?.url;
+        if (fallbackUrl) setZoomImageUrl(fallbackUrl);
+      }
+    };
+    window.addEventListener('thumbnail-zoom-update', handler);
+    return () => window.removeEventListener('thumbnail-zoom-update', handler);
+  }, [setSelectedThumbnailUrl]);
+
   const toggleSelect = (id: string) => {
     setSelectedReferencePhotoIds((prev) => {
       const exists = prev.includes(id);
@@ -208,7 +237,7 @@ export default function ThumbnailModal() {
                           // use the short-lived presigned URL only for zoom/preview.
                           const stableUrl = (it as any).url || data.url;
                           setSelectedThumbnailUrl(stableUrl);
-                          setApprovalCandidate({ id: (it as any).id, url: stableUrl });
+                          setApprovalCandidate({ id: (it as any).id, url: stableUrl, file_key: (it as any).file_key || (it as any).key });
                         }
                       } catch (e) {
                         console.error('Failed to get presigned URL:', e);
@@ -216,7 +245,7 @@ export default function ThumbnailModal() {
                     }}
                     role="button"
                     tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedThumbnailUrl(it.url); setApprovalCandidate({ id: (it as any).id, url: it.url }); } }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedThumbnailUrl((it as any).url); setApprovalCandidate({ id: (it as any).id, url: (it as any).url, file_key: (it as any).file_key || (it as any).key }); } }}
                   >
                     <PresignedImage fileKey={it.file_key} fallbackUrl={it.url || undefined} />
                     <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-[9px]">
@@ -269,6 +298,33 @@ export default function ThumbnailModal() {
                   console.error('Image load error for URL:', zoomImageUrl || selectedThumbnailUrl);
                 }}
               />
+              <div className="mt-4 text-black">
+                <p className="text-sm mb-3">If you want to make any changes to this image, just tell me what to change below. Otherwise, click the button.</p>
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    className="px-5 py-2 rounded-full font-bold text-white"
+                    style={{ backgroundColor: '#3086ff' }}
+                    onClick={async () => {
+                      try {
+                        const planIdMatch = window.location.pathname.split('/').pop();
+                        if (!planIdMatch) return;
+                        await fetch('/api/video-plans', { 
+                          method: 'PUT', 
+                          headers: { 'Content-Type': 'application/json' }, 
+                          body: JSON.stringify({ id: planIdMatch, thumbnail_url: selectedThumbnailUrl }) 
+                        });
+                        setApprovalCandidate(undefined);
+                        setSelectedThumbnailUrl(undefined);
+                        setZoomImageUrl(undefined);
+                        window.location.reload();
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                  >Use this thumbnail</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

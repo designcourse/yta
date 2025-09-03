@@ -24,8 +24,8 @@ interface NeriaContextType {
   setGeneratedThumbnails: (items: Array<{ id: string; key: string; url?: string }>) => void;
   selectedThumbnailUrl?: string;
   setSelectedThumbnailUrl: (url?: string) => void;
-  approvalCandidate?: { id: string; url?: string };
-  setApprovalCandidate: (c?: { id: string; url?: string }) => void;
+  approvalCandidate?: { id: string; url?: string; file_key?: string };
+  setApprovalCandidate: (c?: { id: string; url?: string; file_key?: string }) => void;
 }
 
 const NeriaContext = createContext<NeriaContextType | undefined>(undefined);
@@ -53,7 +53,7 @@ export const NeriaProvider: React.FC<NeriaProviderProps> = ({ children }) => {
   const [generationLoading, setGenerationLoading] = useState<boolean>(false);
   const [generatedThumbnails, setGeneratedThumbnails] = useState<Array<{ id: string; key: string; url?: string }>>([]);
   const [selectedThumbnailUrl, setSelectedThumbnailUrl] = useState<string | undefined>(undefined);
-  const [approvalCandidate, setApprovalCandidate] = useState<{ id: string; url?: string } | undefined>(undefined);
+  const [approvalCandidate, setApprovalCandidate] = useState<{ id: string; url?: string; file_key?: string } | undefined>(undefined);
 
   return (
     <NeriaContext.Provider value={{

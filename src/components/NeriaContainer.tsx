@@ -45,7 +45,7 @@ function parseMarkdownLinks(text: string): React.ReactElement {
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
-  const { isFullscreen, setIsFullscreen, currentChannelId, isOverlayActive, thumbnailModeActive, generationLoading, setGenerationLoading, selectedReferencePhotoIds, textInThumbnail, setGeneratedThumbnails, setSelectedThumbnailUrl, approvalCandidate, setApprovalCandidate } = useNeria();
+  const { isFullscreen, setIsFullscreen, currentChannelId, isOverlayActive, thumbnailModeActive, generationLoading, setGenerationLoading, selectedReferencePhotoIds, textInThumbnail, setGeneratedThumbnails, setSelectedThumbnailUrl, selectedThumbnailUrl, approvalCandidate, setApprovalCandidate } = useNeria();
   
   // Position and size state for when in fullscreen/absolute mode
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -288,7 +288,9 @@ const NeriaContainer: React.FC = () => {
               textInThumbnail,
               referencePhotoIds: selectedReferencePhotoIds,
               channelId: currentChannelId,
-              planId: threadId ? undefined : undefined
+              planId: threadId ? undefined : undefined,
+              // If the user is viewing a generated image and wants changes, send its file_key for edit context
+              editFileKey: (approvalCandidate as any)?.file_key || undefined
             })
           });
           console.log('=== THUMBNAIL GENERATION RESPONSE ===');
@@ -310,11 +312,24 @@ const NeriaContainer: React.FC = () => {
           if (Array.isArray(data.generated) && data.generated.length > 0) {
             console.log('=== SUCCESS: Generated thumbnails ===', data.generated);
             setGeneratedThumbnails(data.generated);
-            // Add assistant message to ask to use this thumbnail after click in modal
+            const newest = data.generated[0];
+            if (newest?.url) {
+              // If user is currently previewing, update the full-screen view in-place
+              if (selectedThumbnailUrl) {
+                setSelectedThumbnailUrl(newest.url);
+                try {
+                  const ev = new CustomEvent('thumbnail-zoom-update', { detail: { url: newest.url, fileKey: newest.file_key || newest.key } });
+                  window.dispatchEvent(ev);
+                } catch {}
+              }
+              // Keep the current candidate up to date for "Use" CTA
+              setApprovalCandidate({ id: newest.id, url: newest.url, file_key: newest.file_key || newest.key });
+            }
+            // Add assistant message to invite further edits or use action
             const assistantMsgId = `asst-message-${Date.now()}`;
             setMessages((prev) => [
               ...prev,
-              { id: assistantMsgId, role: 'assistant', content: 'I generated a thumbnail preview. Click it in the modal to review. Do you want to use this as your thumbnail?', created_at: new Date().toISOString() },
+              { id: assistantMsgId, role: 'assistant', content: 'How about this? If you want to make any changes to this image, just tell me what to change below. Otherwise, click the Use this thumbnail button below.', created_at: new Date().toISOString() },
             ]);
           } else {
             const msg = data?.message || 'No thumbnail was generated. Please try a different prompt.';
@@ -709,17 +724,16 @@ const NeriaContainer: React.FC = () => {
                 ))}
                 <div ref={messagesEndRef} />
                 
-                {/* Approval buttons - only show when there's a candidate */}
+                {/* Approval action - single CTA */}
                 {approvalCandidate && (
-                  <div className="flex gap-3 mt-4 justify-center">
+                  <div className="flex mt-4 justify-center">
                     <button
                       type="button"
-                      className="px-4 py-2 rounded-full font-bold text-white"
+                      className="px-5 py-2 rounded-full font-bold text-white"
                       style={{ backgroundColor: '#3086ff' }}
                       onClick={async () => {
                         try {
                           if (!currentChannelId || !approvalCandidate?.id) return;
-                          // Save selected thumbnail association to plan via API
                           const planIdMatch = window.location.pathname.split('/').pop();
                           if (!planIdMatch) return;
                           await fetch('/api/video-plans', { 
@@ -729,19 +743,12 @@ const NeriaContainer: React.FC = () => {
                           });
                           setApprovalCandidate(undefined);
                           setSelectedThumbnailUrl(undefined);
-                          // Close modal and refresh page to show selected thumbnail
                           window.location.reload();
                         } catch (e) {
                           console.error(e);
                         }
                       }}
-                    >Yes</button>
-                    <button
-                      type="button"
-                      className="px-4 py-2 rounded-full font-bold text-white"
-                      style={{ backgroundColor: '#3086ff' }}
-                      onClick={() => { setApprovalCandidate(undefined); setSelectedThumbnailUrl(undefined); }}
-                    >No</button>
+                    >Use this thumbnail</button>
                   </div>
                 )}
               </div>
