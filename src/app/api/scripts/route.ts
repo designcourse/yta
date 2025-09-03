@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getClient } from "@/utils/openai";
+import { getPrompt } from "@/utils/prompts";
 
 type GenerateBody = {
   planId: string;
@@ -116,7 +117,7 @@ export async function POST(request: Request) {
     const scriptId = insertRes.data?.id as string;
 
     const client = getClient("openai");
-    const system = `You are Neria, a YouTube content planning assistant. Create a high-level video script broken into sections. Each section has: start_time_seconds (integer), title, summary (single paragraph), and up to 5 resource links {label,url}. Focus on guidance for creators, not word-for-word dialogue. Output ONLY strict JSON matching this TypeScript type:\n{\n  "duration_seconds": number,\n  "sections": Array<{\n    "start_time_seconds": number,\n    "title": string,\n    "summary": string,\n    "resources": Array<{"label": string, "url": string}>\n  }>\n}`;
+    const system = await getPrompt("video_script_structure");
 
     const userPrompt = `Video title: ${plan.title}\n\nVideo summary: ${plan.summary}\n\nUser request: ${body.prompt}\n\nDesired total duration: ~${desiredMinutes} minutes${sectionsRequested ? `\nDesired sections: ${sectionsRequested}` : ''}. If not specified, choose a reasonable number of sections. Ensure the first section starts at 0 seconds.`;
 
