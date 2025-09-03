@@ -407,3 +407,9 @@ APIs
 Environment
 - `GEMINI_API_KEY` (Google Generative Language API key)
 - `S3_PUBLIC_BASE_URL` (optional public base for S3 URLs)
+
+### Script Planner (LLM‑generated video flow)
+- Schema: added `scripts`, `script_sections`, `section_resources`, `section_assets` with RLS tied to `video_plans.user_id`, indices, and `updated_at` triggers.
+- API: `GET/POST /api/scripts` stores a script per video plan; POST replaces any existing script (supports regeneration). Section resources are fetched via Perplexity (sonar-pro) to produce authoritative, working links.
+- Chat integration: on `/planner/video/[planId]`, the chat route uses GPT‑4o to classify prompts (script/guide/outline/flow, etc.), extracts optional duration/section counts, forwards cookies, calls `/api/scripts`, and emits SSE `script_generating`/`script_generated` (and `error`).
+- UI: `ScriptContainer` listens for those events and shows the shared blue-ring loader, then renders `ScriptView` (timestamp + title + description + vertical resource links) or `NoScriptLayout` when absent.
