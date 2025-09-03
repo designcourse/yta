@@ -138,4 +138,28 @@ export async function GET(request: Request) {
   }
 }
 
+export async function PUT(request: Request) {
+  try {
+    const { id, thumbnail_url } = await request.json();
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    const { data, error } = await supabase
+      .from('video_plans')
+      .update({ thumbnail_url, thumbnail_selected_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .select('id, thumbnail_url, thumbnail_selected_at')
+      .single();
+    if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+    return NextResponse.json({ plan: data });
+  } catch (e) {
+    console.error('Update video plan error:', e);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
+}
+
 

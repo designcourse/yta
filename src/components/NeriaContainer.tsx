@@ -45,7 +45,7 @@ function parseMarkdownLinks(text: string): React.ReactElement {
 
 const NeriaContainer: React.FC = () => {
   const [isMinimized, setIsMinimized] = useState(false);
-  const { isFullscreen, setIsFullscreen, currentChannelId, isOverlayActive } = useNeria();
+  const { isFullscreen, setIsFullscreen, currentChannelId, isOverlayActive, thumbnailModeActive, generationLoading, setGenerationLoading, selectedReferencePhotoIds, textInThumbnail, setGeneratedThumbnails, setSelectedThumbnailUrl, approvalCandidate, setApprovalCandidate } = useNeria();
   
   // Position and size state for when in fullscreen/absolute mode
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -65,6 +65,17 @@ const NeriaContainer: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [contextPercentage, setContextPercentage] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // When thumbnail mode is activated, show a guiding message and prevent normal chat routing
+  useEffect(() => {
+    if (thumbnailModeActive) {
+      const assistantId = `asst-guide-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantId, role: 'assistant', content: 'Specify your settings and reference photos, then come here and tell me about the thumbnail you want to create.', created_at: new Date().toISOString() },
+      ]);
+    }
+  }, [thumbnailModeActive]);
 
   // Function to refresh messages
   const refreshMessages = useCallback(async () => {
@@ -264,6 +275,57 @@ const NeriaContainer: React.FC = () => {
 
     try {
       setSending(true);
+      // If in thumbnail mode, divert to Gemini image generation API
+      if (thumbnailModeActive) {
+        // Lock chat UI and show animated border via generationLoading flag too
+        setGenerationLoading(true);
+        try {
+          const res = await fetch('/api/gemini/generate-thumbnail', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: value,
+              textInThumbnail,
+              referencePhotoIds: selectedReferencePhotoIds,
+              channelId: currentChannelId,
+              planId: threadId ? undefined : undefined
+            })
+          });
+          console.log('=== THUMBNAIL GENERATION RESPONSE ===');
+          console.log('Response status:', res.status);
+          console.log('Response ok:', res.ok);
+          
+          const data = await res.json();
+          console.log('Response data:', data);
+          console.log('=== END RESPONSE ===');
+          
+          if (!res.ok) {
+            const msg = data?.message || `Image generation failed (${res.status}).`;
+            console.error('=== SHOWING ERROR MESSAGE ===', msg);
+            setMessages((prev) => prev.map(m => m.id === assistantId ? { ...m, content: msg } : m));
+            return;
+          }
+          
+          // data.generated: Array<{ id, key, url }>
+          if (Array.isArray(data.generated) && data.generated.length > 0) {
+            console.log('=== SUCCESS: Generated thumbnails ===', data.generated);
+            setGeneratedThumbnails(data.generated);
+            // Add assistant message to ask to use this thumbnail after click in modal
+            const assistantMsgId = `asst-message-${Date.now()}`;
+            setMessages((prev) => [
+              ...prev,
+              { id: assistantMsgId, role: 'assistant', content: 'I generated a thumbnail preview. Click it in the modal to review. Do you want to use this as your thumbnail?', created_at: new Date().toISOString() },
+            ]);
+          } else {
+            const msg = data?.message || 'No thumbnail was generated. Please try a different prompt.';
+            console.error('=== NO THUMBNAILS GENERATED ===', msg);
+            setMessages((prev) => prev.map(m => m.id === assistantId ? { ...m, content: msg } : m));
+          }
+        } finally {
+          setGenerationLoading(false);
+        }
+        return;
+      }
       console.log('Sending Neria message:', {
         channelId: currentChannelId,
         threadId,
@@ -626,14 +688,50 @@ const NeriaContainer: React.FC = () => {
                       >
                         {m.content}
                       </div>
-                    ) : (
-                      <div className="text-white space-y-4 max-w-[85%]">
+                                         ) : (
+                       <div className="text-white space-y-4 max-w-[85%]">
                         <div className="text-base leading-relaxed opacity-90 whitespace-pre-wrap">{parseMarkdownLinks(m.content)}</div>
-                      </div>
+                       </div>
                     )}
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
+                
+                {/* Approval buttons - only show when there's a candidate */}
+                {approvalCandidate && (
+                  <div className="flex gap-3 mt-4 justify-center">
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded-full font-bold text-white"
+                      style={{ backgroundColor: '#3086ff' }}
+                      onClick={async () => {
+                        try {
+                          if (!currentChannelId || !approvalCandidate?.id) return;
+                          // Save selected thumbnail association to plan via API
+                          const planIdMatch = window.location.pathname.split('/').pop();
+                          if (!planIdMatch) return;
+                          await fetch('/api/video-plans', { 
+                            method: 'PUT', 
+                            headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify({ id: planIdMatch, thumbnail_url: approvalCandidate.url }) 
+                          });
+                          setApprovalCandidate(undefined);
+                          setSelectedThumbnailUrl(undefined);
+                          // Close modal and refresh page to show selected thumbnail
+                          window.location.reload();
+                        } catch (e) {
+                          console.error(e);
+                        }
+                      }}
+                    >Yes</button>
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded-full font-bold text-white"
+                      style={{ backgroundColor: '#3086ff' }}
+                      onClick={() => { setApprovalCandidate(undefined); setSelectedThumbnailUrl(undefined); }}
+                    >No</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -671,7 +769,7 @@ const NeriaContainer: React.FC = () => {
                 <input
                   name="neriaInput"
                   type="text"
-                  placeholder="Ask Neria about your YouTube strategy..."
+                  placeholder={thumbnailModeActive ? "Describe the thumbnail you want to create..." : "Ask Neria about your YouTube strategy..."}
                   className="w-full px-4 py-3 bg-transparent border border-white/20 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                   style={{ borderRadius: '12px' }}
                   value={inputValue}
@@ -682,7 +780,7 @@ const NeriaContainer: React.FC = () => {
                       if (!sending) sendMessage();
                     }
                   }}
-                  disabled={sending}
+                  disabled={sending || generationLoading}
                 />
               </form>
             </div>
@@ -696,8 +794,8 @@ const NeriaContainer: React.FC = () => {
                 borderRadius: '12px'
               }}
               aria-label="Send message"
-              onClick={() => { if (!sending) sendMessage(); }}
-              disabled={sending}
+              onClick={() => { if (!sending && !generationLoading) sendMessage(); }}
+              disabled={sending || generationLoading}
             >
               {!sending ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none">

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import SimpleDropdown from './SimpleDropdown';
 import PresignedImage from './PresignedImage';
+import { useNeria } from './NeriaContext';
 
 // Assets exported by Figma tool into public/figma
 const imgIconParkSolidDownOne = "/figma/dcd4d51eb39bfadd74010532e40b8d4bcb96a7f5.svg";
@@ -15,6 +16,8 @@ interface Photo {
 export default function ThumbnailModal() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [zoomImageUrl, setZoomImageUrl] = useState<string | undefined>(undefined);
+  const { selectedReferencePhotoIds, setSelectedReferencePhotoIds, textInThumbnail, setTextInThumbnail, generationLoading, generatedThumbnails, setSelectedThumbnailUrl, selectedThumbnailUrl, setApprovalCandidate, setGeneratedThumbnails } = useNeria();
 
   // Try to infer channelId from URL: /dashboard/[channelId]/...
   const channelId = typeof window !== 'undefined' ? decodeURIComponent((window.location.pathname.split('/')[2] || '')) : '';
@@ -30,6 +33,18 @@ export default function ThumbnailModal() {
     };
     load();
   }, [channelId]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedReferencePhotoIds((prev) => {
+      const exists = prev.includes(id);
+      if (exists) return prev.filter((x) => x !== id);
+      if (prev.length >= 3) return prev; // max 3
+      return [...prev, id];
+    });
+  };
+
+  const selectedSet = useMemo(() => new Set(selectedReferencePhotoIds), [selectedReferencePhotoIds]);
+
   return (
     <div
       className="bg-[#eff0f9] box-border content-stretch flex flex-col gap-8 items-start justify-start overflow-clip p-[48px] relative rounded-[12px] size-full"
@@ -37,7 +52,19 @@ export default function ThumbnailModal() {
       data-node-id="74:343"
     >
       <div className="content-stretch flex gap-7 items-center justify-start relative shrink-0 w-full" data-name="Options" data-node-id="74:386">
-        <SimpleDropdown label="Text in Thumbnail" value="MCP" className="w-[220px]" />
+        {/* Faux-dropdown styled textfield */}
+        <div className="relative content-stretch flex flex-col gap-[7px] items-start justify-start w-[220px]">
+          <div className="font-['Inter:Bold',_sans-serif] font-bold text-[20px] leading-[30px] text-black">Text in Thumbnail</div>
+          <div className="flex items-center justify-between w-[220px] h-14 px-5 py-4 bg-white border border-gray-200 rounded-lg">
+            <input
+              type="text"
+              placeholder="Optional"
+              className="w-full outline-none text-base text-gray-900"
+              value={textInThumbnail}
+              onChange={(e) => setTextInThumbnail(e.target.value)}
+            />
+          </div>
+        </div>
         <SimpleDropdown label="Text Treatment" value="3D Chrome" className="w-[220px]" />
         <SimpleDropdown label="Style" value="MrBeast Thumbs" className="w-[220px]" />
       </div>
@@ -56,7 +83,36 @@ export default function ThumbnailModal() {
               </>
             )}
             {photos.map((p) => (
-              <PresignedImage key={p.id} fileKey={p.file_key} fallbackUrl={p.url || undefined} />
+              <div
+                key={p.id}
+                onClick={() => toggleSelect(p.id)}
+                className={`relative rounded-[9px] ${selectedSet.has(p.id) ? 'neria-loading-border' : ''}`}
+                style={{ display: 'inline-block', cursor: 'pointer' }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSelect(p.id); } }}
+              >
+                <div className="absolute -top-1 -right-1 z-10">
+                  <button
+                    type="button"
+                    aria-label="Delete reference"
+                    className="w-6 h-6 rounded-full bg-white/80 hover:bg-white flex items-center justify-center text-gray-700 shadow"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        const res = await fetch(`/api/reference-photos?id=${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+                        if (res.ok) {
+                          setPhotos((prev) => prev.filter(x => x.id !== p.id));
+                          setSelectedReferencePhotoIds((prev) => prev.filter(x => x !== p.id));
+                        }
+                      } catch {}
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                  </button>
+                </div>
+                <PresignedImage fileKey={p.file_key} fallbackUrl={p.url || undefined} />
+              </div>
             ))}
           </div>
         </div>
@@ -121,19 +177,99 @@ export default function ThumbnailModal() {
       </div>
       <div className="content-stretch flex gap-6 items-center justify-start relative shrink-0 w-full" data-name="Generated Thumbs Container" data-node-id="74:391">
         <div className="basis-0 flex flex-row grow items-center self-stretch shrink-0">
-          <div className="basis-0 bg-[#e0e2ee] grow h-full min-h-px min-w-px rounded-[12px] shrink-0" data-name="Thumbs" data-node-id="74:344" />
-        </div>
-        <div className="basis-0 flex flex-row grow items-center self-stretch shrink-0">
-          <div className="basis-0 bg-[#e0e2ee] grow h-full min-h-px min-w-px relative rounded-[12px] shrink-0" data-name="Thumbs" data-node-id="74:355">
-            <div aria-hidden="true" className="absolute border-[#3086ff] border-[3px] border-solid inset-0 pointer-events-none rounded-[12px]" />
+          <div className="basis-0 bg-[#e0e2ee] grow min-h-[140px] min-w-px rounded-[12px] shrink-0 p-4 relative">
+            {generationLoading && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+              </div>
+            )}
+            {!generationLoading && generatedThumbnails.length === 0 && (
+              <div className="text-gray-500 text-sm">Generated thumbnails will appear here…</div>
+            )}
+            {!generationLoading && generatedThumbnails.length > 0 && (
+              <div className="flex gap-4 overflow-x-auto">
+                {generatedThumbnails.map((it) => (
+                  <div
+                    key={(it as any).id || it.key}
+                    className="relative group cursor-pointer"
+                    onClick={async () => { 
+                      console.log('=== CLICKING GENERATED THUMBNAIL ===');
+                      console.log('Thumbnail object:', it);
+                      console.log('File key:', it.file_key);
+                      console.log('=== END CLICK ===');
+                      
+                      // Get presigned URL for the zoom view
+                      try {
+                        const res = await fetch(`/api/s3-presign-get?key=${encodeURIComponent(it.file_key)}`);
+                        if (res.ok) {
+                          const data = await res.json();
+                          setZoomImageUrl(data.url);
+                          setSelectedThumbnailUrl(data.url);
+                          setApprovalCandidate({ id: (it as any).id, url: data.url });
+                        }
+                      } catch (e) {
+                        console.error('Failed to get presigned URL:', e);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedThumbnailUrl(it.url); setApprovalCandidate({ id: (it as any).id, url: it.url }); } }}
+                  >
+                    <PresignedImage fileKey={it.file_key} fallbackUrl={it.url || undefined} />
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-[9px]">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M21 21l-5.2-5.2M10 17a7 7 0 1 1 0-14 7 7 0 0 1 0 14z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Delete generated"
+                      className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-white/80 hover:bg-white flex items-center justify-center text-gray-700 shadow"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        try {
+                          const res = await fetch(`/api/video-thumbnails?id=${encodeURIComponent((it as any).id)}`, { method: 'DELETE' });
+                          if (res.ok) {
+                            setGeneratedThumbnails((prev) => prev.filter(x => (x as any).id !== (it as any).id));
+                          }
+                        } catch {}
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-        <div className="basis-0 flex flex-row grow items-center self-stretch shrink-0">
-          <div className="basis-0 bg-[#e0e2ee] grow h-full min-h-px min-w-px rounded-[12px] shrink-0" data-name="Thumbs" data-node-id="74:356" />
         </div>
       </div>
       <div className="absolute left-[312px] size-[100px] top-[152px]" data-node-id="74:380" />
       {/* Close icon handled by parent container to avoid duplicates */}
+
+      {selectedThumbnailUrl && (
+        <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-6" onClick={() => { setSelectedThumbnailUrl(undefined); setZoomImageUrl(undefined); }}>
+          <div className="relative w-full max-w-[960px]" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              aria-label="Close"
+              className="absolute top-3 right-3 z-[1]"
+              onClick={() => { setSelectedThumbnailUrl(undefined); setZoomImageUrl(undefined); }}
+            >
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>
+            </button>
+            <div className="bg-white rounded-[12px] overflow-hidden p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img 
+                src={zoomImageUrl || selectedThumbnailUrl} 
+                alt="zoom" 
+                className="w-full h-auto object-contain"
+                onError={(e) => {
+                  console.error('Image load error for URL:', zoomImageUrl || selectedThumbnailUrl);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

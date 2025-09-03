@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
+import { getS3Client, getBucketName } from "@/utils/s3";
 
 export async function GET(request: Request) {
   try {
@@ -76,6 +77,39 @@ export async function POST(request: Request) {
   } catch (e) {
     console.error("reference-photos POST error", e);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
+
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+
+    const { data: row } = await supabase
+      .from('reference_photos')
+      .select('id, file_key, channel_id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    const s3 = getS3Client();
+    const Bucket = getBucketName();
+    try {
+      await s3.deleteObject({ Bucket, Key: row.file_key } as any);
+    } catch {}
+
+    const admin = createSupabaseAdminClient();
+    await admin.from('reference_photos').delete().eq('id', row.id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    console.error('reference-photos DELETE error', e);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
 

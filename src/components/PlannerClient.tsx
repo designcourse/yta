@@ -27,7 +27,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [videoIdeas, setVideoIdeas] = useState<VideoIdeaData[]>([]);
-  const [savedPlans, setSavedPlans] = useState<{ id: string; title: string; created_at: string }[]>([]);
+  const [savedPlans, setSavedPlans] = useState<{ id: string; title: string; created_at: string; thumbnail_url?: string | null; thumbnail_selected_at?: string | null }[]>([]);
   const [channelData, setChannelData] = useState<ChannelData | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -102,7 +102,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
       const res = await fetch(`/api/video-plans?channelId=${encodeURIComponent(channelId)}`, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
-      const plans = (data.plans || []) as { id: string; title: string; created_at: string }[];
+      const plans = (data.plans || []) as { id: string; title: string; created_at: string; thumbnail_url?: string | null; thumbnail_selected_at?: string | null }[];
       setSavedPlans(plans);
     } catch {}
   }, [channelId]);
@@ -271,8 +271,19 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
                 style={{ minWidth: '300px' }}
               >
                 <div className="bg-white rounded-lg overflow-hidden">
-                  <div className="w-full h-[221px] flex items-center justify-center" style={{ backgroundColor: '#D7D9F2' }}>
-                    <span className="text-gray-500">Thumbnail Preview</span>
+                  <div className="w-full h-[221px] flex items-center justify-center relative" style={{ backgroundColor: '#D7D9F2' }}>
+                    {plan.thumbnail_url ? (
+                      // If a custom thumbnail was selected for this plan, show it
+                      <img
+                        src={plan.thumbnail_url}
+                        alt={`${plan.title} thumbnail`}
+                        className="absolute inset-0 w-full h-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <span className="text-gray-500">Thumbnail Preview</span>
+                    )}
                   </div>
                   <div className="p-4 flex items gap-4">
                     <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
