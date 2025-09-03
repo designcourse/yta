@@ -11,7 +11,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
 
   const { data: plan } = await supabase
     .from("video_plans")
-    .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at")
+    .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at, channel_id")
     .eq("id", planId)
     .eq("user_id", user!.id)
     .maybeSingle();
@@ -19,10 +19,15 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
   // Load channel info for avatar and name
   const { data: channel } = await supabase
     .from("channels")
-    .select("title, thumbnails")
+    .select("id, title, thumbnails")
     .eq("channel_id", channelId)
     .eq("user_id", user!.id)
     .maybeSingle();
+
+  // Guard: ensure the requested plan belongs to the currently selected channel
+  if (!plan || !channel || (plan as any).channel_id !== (channel as any).id) {
+    redirect(`/dashboard/${channelId}/latest-video`);
+  }
 
   const thumbnails = (channel as any)?.thumbnails || {};
   const avatarUrl = thumbnails?.high?.url || thumbnails?.medium?.url || thumbnails?.default?.url || thumbnails?.maxres?.url || thumbnails?.standard?.url || null;
