@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 
-export default function PresignedImage({ fileKey, fallbackUrl }: { fileKey: string; fallbackUrl?: string }) {
+export default function PresignedImage({ fileKey, fallbackUrl, className, imgClassName }: { fileKey: string; fallbackUrl?: string; className?: string; imgClassName?: string }) {
   const [url, setUrl] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -22,9 +22,9 @@ export default function PresignedImage({ fileKey, fallbackUrl }: { fileKey: stri
   }, [fileKey, fallbackUrl]);
 
   return (
-    <div className="h-[84px] w-[140px] bg-[#e0e2ee] rounded-[9px] overflow-hidden shrink-0">
+    <div className={className || "h-[84px] w-[140px] bg-[#e0e2ee] rounded-[9px] overflow-hidden shrink-0"}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      {url && <img src={url} alt="ref" className="w-full h-full object-cover" />}
+      {url && <img src={url} alt="ref" className={imgClassName || "w-full h-full object-cover"} />}
     </div>
   );
 }

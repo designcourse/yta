@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import ThumbnailModal from './ThumbnailModal';
 import { useNeria } from './NeriaContext';
+import PresignedImage from './PresignedImage';
 
 interface ThumbnailPickerProps {
   thumbnailUrl?: string | null;
@@ -21,8 +22,28 @@ export default function ThumbnailPicker({ thumbnailUrl }: ThumbnailPickerProps) 
     <div className="w-full h-[221px] flex items-center justify-center relative group" style={{ backgroundColor: '#D7D9F2' }}>
       {thumbnailUrl ? (
         <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={thumbnailUrl} alt="Selected thumbnail" className="w-full h-full object-cover"/>
+          {(() => {
+            let fileKey: string | undefined = undefined;
+            try {
+              const u = new URL(thumbnailUrl);
+              fileKey = u.pathname.startsWith('/') ? u.pathname.slice(1) : u.pathname;
+            } catch {}
+            return (
+              <>
+                {fileKey ? (
+                  <PresignedImage 
+                    fileKey={fileKey} 
+                    fallbackUrl={thumbnailUrl || undefined}
+                    className="absolute inset-0"
+                    imgClassName="w-full h-full object-cover"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={thumbnailUrl} alt="Selected thumbnail" className="absolute inset-0 w-full h-full object-cover"/>
+                )}
+              </>
+            );
+          })()}
           {/* Edit icon on hover */}
           <button
             type="button"

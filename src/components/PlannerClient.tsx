@@ -274,13 +274,31 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
                   <div className="w-full h-[221px] flex items-center justify-center relative" style={{ backgroundColor: '#D7D9F2' }}>
                     {plan.thumbnail_url ? (
                       // If a custom thumbnail was selected for this plan, show it
-                      <img
-                        src={plan.thumbnail_url}
-                        alt={`${plan.title} thumbnail`}
-                        className="absolute inset-0 w-full h-full object-cover"
-                        loading="lazy"
-                        decoding="async"
-                      />
+                      (() => {
+                        try {
+                          const u = new URL(plan.thumbnail_url as string);
+                          const key = u.pathname.startsWith('/') ? u.pathname.slice(1) : u.pathname;
+                          const Presigned = require('./PresignedImage').default as (props: any) => JSX.Element;
+                          return (
+                            <Presigned 
+                              fileKey={key} 
+                              fallbackUrl={plan.thumbnail_url || undefined}
+                              className="absolute inset-0"
+                              imgClassName="w-full h-full object-cover"
+                            />
+                          );
+                        } catch {
+                          return (
+                            <img
+                              src={plan.thumbnail_url as string}
+                              alt={`${plan.title} thumbnail`}
+                              className="absolute inset-0 w-full h-full object-cover"
+                              loading="lazy"
+                              decoding="async"
+                            />
+                          );
+                        }
+                      })()
                     ) : (
                       <span className="text-gray-500">Thumbnail Preview</span>
                     )}

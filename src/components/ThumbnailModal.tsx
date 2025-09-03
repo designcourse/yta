@@ -204,8 +204,11 @@ export default function ThumbnailModal() {
                         if (res.ok) {
                           const data = await res.json();
                           setZoomImageUrl(data.url);
-                          setSelectedThumbnailUrl(data.url);
-                          setApprovalCandidate({ id: (it as any).id, url: data.url });
+                          // Prefer the permanent public URL (if available) when saving to the plan,
+                          // use the short-lived presigned URL only for zoom/preview.
+                          const stableUrl = (it as any).url || data.url;
+                          setSelectedThumbnailUrl(stableUrl);
+                          setApprovalCandidate({ id: (it as any).id, url: stableUrl });
                         }
                       } catch (e) {
                         console.error('Failed to get presigned URL:', e);
