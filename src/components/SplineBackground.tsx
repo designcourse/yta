@@ -13,6 +13,10 @@ interface SplineBackgroundProps {
 export default function SplineBackground({ neriaX, animateNeriaRing, pathname }: SplineBackgroundProps = {}) {
   const splineRef = useRef<any>(null);
   const hasAnimatedRef = useRef<boolean>(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   const currentPathname = usePathname();
   const activePathname = pathname || currentPathname;
 
@@ -29,6 +33,38 @@ export default function SplineBackground({ neriaX, animateNeriaRing, pathname }:
     } catch (e) {}
     return false;
   };
+
+  // Forward global pointer moves to Spline canvas so it reacts even when covered by UI layers
+  useEffect(() => {
+    const handlePointerMove = (ev: PointerEvent) => {
+      lastPointer.current = { x: ev.clientX, y: ev.clientY };
+      if (rafRef.current == null) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          const canvas = canvasRef.current;
+          const coords = lastPointer.current;
+          if (!canvas || !coords) return;
+          const event = new PointerEvent('pointermove', {
+            clientX: coords.x,
+            clientY: coords.y,
+            bubbles: true,
+            cancelable: true,
+            pointerId: 1,
+            pointerType: 'mouse',
+            isPrimary: true,
+          });
+          canvas.dispatchEvent(event);
+        });
+      }
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove as any);
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (splineRef.current) {
@@ -82,12 +118,18 @@ export default function SplineBackground({ neriaX, animateNeriaRing, pathname }:
     <div 
       className="fixed inset-0 w-full h-full"
       style={{ zIndex: 1 }}
+      ref={containerRef}
     >
       <Spline
         scene="https://prod.spline.design/4XuLUrstfCHJ79xe/scene.splinecode"
         style={{ width: '100%', height: '100%' }}
         onLoad={(spline) => {
           splineRef.current = spline;
+          // Capture the underlying canvas element for event forwarding
+          try {
+            const foundCanvas = containerRef.current?.querySelector('canvas') || null;
+            canvasRef.current = foundCanvas;
+          } catch {}
 
           if (isCollectionPage) {
             // Set neria_x for collection page (variable preferred)
