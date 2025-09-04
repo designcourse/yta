@@ -1,0 +1,152 @@
+---
+alwaysApply: true
+description: YouTube Analytics App development context and architecture guidelines
+---
+
+# YouTube Analytics App - Development Context
+
+## Project Overview
+This is a YouTube analytics app for creators that provides AI-powered insights, channel management, and video planning tools. The app features advanced text animation, real-time analytics, and an AI assistant named Neria.
+
+## Tech Stack & Architecture
+- **Framework**: Next.js 15.5.0 with App Router
+- **Language**: TypeScript with strict typing
+- **Styling**: Tailwind CSS 4.0 with responsive design patterns
+- **Database**: Supabase (PostgreSQL) with Row Level Security (RLS)
+- **Authentication**: Supabase Auth + Google OAuth (dual-phase authentication)
+- **APIs**: YouTube Data API v3, YouTube Analytics API
+- **AI**: OpenAI GPT-4o (primary), Perplexity (real-time web search only)
+- **3D Graphics**: Spline (@splinetool/react-spline)
+
+## Key Architecture Patterns
+
+### Authentication Flow
+Use dual-phase authentication to prevent Brand Account session hijacking:
+1. **Phase 1**: Basic Google sign-in with minimal scopes → establishes primary user session
+2. **Phase 2**: Popup-based YouTube OAuth → gets YouTube tokens but associates them with original user via `state` parameter
+
+### Database Schema Relationships
+Key tables and their relationships:
+- `google_accounts`: user_id, google_sub, account_email, tokens, last_channel_used
+- `channels`: user_id, channel_id, title, thumbnails, stats
+- `chat_threads`: per-user and optional per-channel chat threads
+- `chat_messages`: thread_id, role (user|assistant), content
+- `memory_profile`: per-user+channel long-term profile (goals, preferences)
+- `channel_strategy`: per-user+channel persisted coaching plans
+- `video_plans`: stored video ideas with AI-generated summaries
+- `scripts`: LLM-generated video flows with sections and resources
+
+### Component Architecture
+- **Layout Components**: Use `DashboardLayout` for dashboard pages with sidebar navigation
+- **AI Components**: `NeriaContainer` (floating chat), `NeriaResponse` (animated text)
+- **Data Components**: `YouTubeStats` (analytics), `PlannerClient` (video ideas)
+- **UI Components**: Follow responsive design with fixed sidebar (213px) and flex main content
+
+## Development Guidelines
+
+### React & Next.js Best Practices
+- Prevent hydration mismatch errors with proper loading states
+- Use Server Components where possible, Client Components only when needed
+- Implement proper error boundaries and loading states
+- Follow App Router conventions for file-based routing
+
+### Animation System
+The app features sophisticated character-by-character text animation:
+- **Batch-Based Animation**: Text appears in 2-sentence chunks with intelligent pauses
+- **Punctuation Timing**: 1-second pauses after periods/exclamation marks, 0.5-second pauses after commas
+- **Unicode Filtering**: Remove problematic Unicode characters and replacement symbols
+- **Performance**: Use CSS transforms and will-change properties for smooth animations
+
+### AI Integration Patterns
+- **Streaming Responses**: Use Server-Sent Events (SSE) for real-time AI responses
+- **Context Management**: Track conversation context with visual indicators
+- **Model Routing**: GPT-4o primary, Perplexity only for real-time web search
+- **Intent Detection**: Use AI-powered intent analysis instead of keyword matching
+
+### Database Operations
+- Always use Row Level Security (RLS) policies
+- Implement proper foreign key relationships
+- Use database transactions for multi-table operations
+- Include proper error handling and validation
+
+### API Route Patterns
+- Use proper HTTP methods (GET, POST, PUT, DELETE)
+- Implement authentication checks on all protected routes
+- Return consistent JSON response formats
+- Handle errors gracefully with appropriate status codes
+
+### UI/UX Guidelines
+- **Responsive Design**: Mobile-first approach with Tailwind breakpoints
+- **No Scrollbars**: Use fixed header/footer with flex-1 main content
+- **Loading States**: Show appropriate loading indicators during async operations
+- **Error Handling**: Display user-friendly error messages
+
+## File Structure Reference
+```
+src/
+├── app/
+│   ├── auth/                    # Authentication routes
+│   ├── api/                     # API endpoints
+│   │   ├── neria/               # AI assistant endpoints
+│   │   ├── youtube-*            # YouTube integration
+│   │   └── [feature]/           # Feature-specific APIs
+│   ├── dashboard/               # Main dashboard pages
+│   │   └── [channelId]/         # Channel-specific routes
+│   └── [page]/                  # Public pages
+├── components/                  # Reusable components
+│   ├── Dashboard*.tsx           # Dashboard-specific components
+│   ├── Neria*.tsx              # AI assistant components
+│   └── [Feature]*.tsx          # Feature components
+└── utils/                       # Utility functions
+    ├── supabase/               # Database clients
+    └── [service].ts            # Service utilities
+```
+
+## Environment Variables
+Required environment variables for development:
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://vmgjrvwwfcomhexlgwds.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=[anon_key]
+SUPABASE_SERVICE_ROLE_KEY=[service_role_key]
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=[google_client_id]
+GOOGLE_CLIENT_ID=[google_client_id]
+GOOGLE_CLIENT_SECRET=[google_client_secret]
+GEMINI_API_KEY=[gemini_api_key]
+```
+
+## Common Issues & Solutions
+
+### Authentication Issues
+- **"invalid_client"**: Check Google Client ID/Secret in environment variables
+- **"redirect_uri_mismatch"**: Ensure redirect URIs match Google Console exactly
+- **Session replacement**: Use popup-based OAuth for secondary authentications
+
+### React & Hydration Issues
+- **Hydration mismatch**: Ensure server and client render identical content initially
+- **Unicode characters**: App automatically filters problematic Unicode from AI responses
+- **Animation timing**: Use cumulative delays with punctuation pauses
+
+### Database Maintenance
+When examining database schema with Supabase MCP:
+1. Compare results against tables in `/api/wipe-all-data/route.ts`
+2. Update wipe API to include any missing user-specific tables
+3. Include tables with `user_id` or `channel_id` foreign keys
+4. Exclude system tables (`model_settings`, `model_providers`, etc.)
+
+## Development Workflow
+1. Use semantic search to understand existing code patterns
+2. Follow established component and API patterns
+3. Test authentication flows thoroughly
+4. Verify responsive design across breakpoints
+5. Ensure proper error handling and loading states
+6. Test AI features with context awareness
+
+## Code Quality Standards
+- Use TypeScript strict mode with proper typing
+- Follow ESLint configuration rules
+- Implement proper error boundaries
+- Use consistent naming conventions
+- Document complex business logic
+- Test edge cases, especially authentication flows
+
+This context document should guide all development decisions and ensure consistency across the YouTube Analytics App codebase.
