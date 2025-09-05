@@ -35,7 +35,8 @@ export default function YouTubeConnectPage() {
       client_id: clientId,
       redirect_uri: `${window.location.origin}/youtube-callback`,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
+      // Add youtube.force-ssl to allow authorized captions download (captions.list/download)
+      scope: "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly https://www.googleapis.com/auth/youtube.force-ssl",
       access_type: "offline",
       prompt: "consent",
       include_granted_scopes: "true",

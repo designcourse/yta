@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getClient, getCurrentModel } from "@/utils/openai";
+import { getValidAccessToken } from "@/utils/googleAuth";
 import { getPrompt } from "@/utils/prompts";
 
 // Normalize relative time expressions (e.g., "this year") to absolute dates for search queries
@@ -552,13 +553,68 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
     if (!statsSummary) {
       const { data: lv } = await supabase
         .from("latest_video_snapshots")
-        .select("video_title, view_count, comment_count, published_at")
+        .select("video_title, view_count, comment_count, published_at, video_id")
         .eq("channel_id", channelId)
         .eq("user_id", userId)
         .limit(1)
         .single();
       if (lv) {
-        statsSummary = `Latest video: ${lv.video_title} | Views: ${lv.view_count} | Comments: ${lv.comment_count} | Published: ${lv.published_at}`;
+        let retentionLine = "";
+        try {
+          if (channelMeta?.externalId && lv.video_id) {
+            const tokenResult = await getValidAccessToken(userId, channelMeta.externalId);
+            if (tokenResult?.success && tokenResult.accessToken) {
+              const endDate = new Date().toISOString().slice(0, 10);
+              const startDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+              const params = new URLSearchParams({
+                ids: `channel==${channelMeta.externalId}`,
+                startDate,
+                endDate,
+                metrics: "relativeRetentionPerformance",
+                dimensions: "elapsedVideoTimeRatio",
+                filters: `video==${lv.video_id}`,
+                sort: "elapsedVideoTimeRatio",
+              });
+              let res = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${params.toString()}`, {
+                headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
+              });
+              if (!res.ok) {
+                // Fallback to channel==MINE which can be required for some brand accounts
+                const alt = new URLSearchParams(params);
+                alt.set('ids', 'channel==MINE');
+                res = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${alt.toString()}`, {
+                  headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
+                });
+              }
+              if (res.ok) {
+                const table = await res.json();
+                const rows = Array.isArray(table?.rows) ? table.rows : [];
+                const getVal = (pct: number) => {
+                  const label = `${pct}%`;
+                  const exact = rows.find((r: any[]) => r?.[0] === label);
+                  if (exact && typeof exact[1] === 'number') return exact[1];
+                  const toNum = (s: string) => Number(String(s || '').replace('%',''));
+                  let best: {diff:number,row:any[]}|undefined;
+                  for (const r of rows) {
+                    const diff = Math.abs(toNum(r?.[0]) - pct);
+                    if (!best || diff < best.diff) best = { diff, row: r };
+                  }
+                  return best && typeof best.row?.[1] === 'number' ? best.row[1] : undefined;
+                };
+                const r25 = getVal(25);
+                const r50 = getVal(50);
+                const r75 = getVal(75);
+                const parts: string[] = [];
+                if (typeof r25 === 'number') parts.push(`rel@25% ${r25.toFixed(2)}`);
+                if (typeof r50 === 'number') parts.push(`50% ${r50.toFixed(2)}`);
+                if (typeof r75 === 'number') parts.push(`75% ${r75.toFixed(2)}`);
+                if (parts.length) retentionLine = ` | Retention: ${parts.join(', ')}`;
+              } // else keep retentionLine empty
+            }
+          }
+        } catch {}
+
+        statsSummary = `Latest Video: "${lv.video_title}" - ${lv.view_count} views, ${lv.comment_count} comments (published ${lv.published_at})${retentionLine}`;
       }
     }
   }
@@ -615,24 +671,30 @@ async function buildSystemPrompt(context: {
   const channelLine = context.channelMeta
     ? `Channel: ${context.channelMeta.title || "(untitled)"} (YouTube ID: ${context.channelMeta.externalId || "unknown"})`
     : "";
-  const profile = context.memoryProfile
-    ? `User Goals: ${context.memoryProfile.goals || ""}\nPreferences: ${context.memoryProfile.preferences || ""}\nConstraints: ${context.memoryProfile.constraints || ""}`
-    : "";
+
+  // Sanitize memory profile by stripping redundant labels and empty lines
+  const clean = (v?: string) => (v || "").replace(/^\s*(Goals?:|Preferences?:|Constraints?:)\s*/i, "").trim();
+  const goals = clean(context.memoryProfile?.goals);
+  const prefs = clean(context.memoryProfile?.preferences);
+  const cons = clean(context.memoryProfile?.constraints);
+  const profileLines = [
+    goals ? `User Goals: ${goals}` : "",
+    prefs ? `Preferences: ${prefs}` : "",
+    cons ? `Constraints: ${cons}` : "",
+  ].filter(Boolean);
+  const profile = profileLines.length ? profileLines.join("\n") : "";
+
   const stats = context.statsSummary ? `Latest Stats: ${context.statsSummary}` : "";
   const about = context.aboutText ? `About: ${context.aboutText}` : "";
-  const titles = context.recentTitles?.length ? `Recent Titles: ${context.recentTitles.slice(0, 6).join(", ")}` : "";
+
+  // Deduplicate and cap recent titles
+  const uniqueTitles = Array.from(new Set((context.recentTitles || []).map(t => (t || "").trim())));
+  const titles = uniqueTitles.length ? `Recent Titles: ${uniqueTitles.slice(0, 6).join(", ")}` : "";
+
   const strategy = context.strategyPlan ? `Current Strategy Plan (persisted):\n${context.strategyPlan}` : "";
 
   const base = await getPrompt('neria_chat_system');
-  return [
-    base,
-    channelLine,
-    profile,
-    stats,
-    about,
-    titles,
-    strategy,
-  ].filter(Boolean).join("\n\n");
+  return [base, channelLine, profile, stats, about, titles, strategy].filter(Boolean).join("\n\n");
 }
 
 async function generateVideoIdeas(supabase: any, userId: string, channelId: string, customPrompt?: string): Promise<boolean> {
@@ -1083,91 +1145,73 @@ export async function POST(request: Request) {
       }
       // Server-side script generation flow via SSE, so UI can listen without client keyword hacks
       if ((body.currentUrl || '').includes('/planner/video/')) {
-        // We are on a specific video planning page; ask the LLM to decide if this is a script request
-        const stream = new ReadableStream({
-          async start(controller) {
-            const encoder = new TextEncoder();
-            try {
-              // Ask OpenAI to classify whether this is a script/flow request and extract constraints
-              const client = getClient('openai');
-              const classify = await client.chat.completions.create({
-                model: 'gpt-4o',
-                messages: [
-                  { role: 'system', content: 'You classify requests on a planner video page. Decide if the user is asking to CREATE or REGENERATE a structured video script/flow/guide/outline/storyboard. Consider synonyms like "guide", "outline", "flow", "sections", "script", "structure", "beats", "storyboard". If the user mentions duration or number of sections, capture them. Return STRICT JSON only: {"is_script": boolean, "duration_minutes": number|null, "sections": number|null}. Set is_script=true when any of these intents/synonyms appear or when the user asks to regenerate/replace a script.' },
-                  { role: 'user', content: body.message }
-                ],
-                max_tokens: 150,
-                temperature: 0
-              });
-              let raw = classify.choices?.[0]?.message?.content?.trim() || '{}';
-              raw = raw.replace(/```json|```/g, '').trim();
-              let parsed: any = {};
-              try { parsed = JSON.parse(raw); } catch {}
-              const isScript = !!parsed?.is_script;
-              const desiredMinutes = Number(parsed?.duration_minutes) || undefined;
-              const desiredSections = Number(parsed?.sections) || undefined;
+        // Classify first; only if it's a script request do we short-circuit to the script-generation SSE.
+        try {
+          const client = getClient('openai');
+          const classify = await client.chat.completions.create({
+            model: 'gpt-4o',
+            messages: [
+              { role: 'system', content: 'You classify requests on a planner video page. Decide if the user is asking to CREATE or REGENERATE a structured video script/flow/guide/outline/storyboard. Consider synonyms like "guide", "outline", "flow", "sections", "script", "structure", "beats", "storyboard". If the user mentions duration or number of sections, capture them. Return STRICT JSON only: {"is_script": boolean, "duration_minutes": number|null, "sections": number|null}. Set is_script=true when any of these intents/synonyms appear or when the user asks to regenerate/replace a script.' },
+              { role: 'user', content: body.message }
+            ],
+            max_tokens: 150,
+            temperature: 0
+          });
+          let raw = classify.choices?.[0]?.message?.content?.trim() || '{}';
+          raw = raw.replace(/```json|```/g, '').trim();
+          let parsed: any = {};
+          try { parsed = JSON.parse(raw); } catch {}
+          const isScript = !!parsed?.is_script;
+          const desiredMinutes = Number(parsed?.duration_minutes) || undefined;
+          const desiredSections = Number(parsed?.sections) || undefined;
 
-              if (!isScript) {
-                // Not a script request; continue with normal chat: emit nothing special
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'message', content: 'Got it. I will respond in chat.' })}\n\n`));
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-                controller.close();
-                return;
-              }
-
-              // Emit generation start so UI can show loader
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'script_generating' })}\n\n`));
-
-              // Resolve plan id from URL path on client; we do not trust client state, so fetch last message context
-              // We do not have planId here; instruct client to include it via URL path. Extract from currentUrl
-              const urlMatch = (body.currentUrl || '').match(/planner\/video\/([^/]+)/);
-              const planId = urlMatch ? urlMatch[1] : undefined;
-              if (!planId) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Unable to determine planId from URL' })}\n\n`));
-                controller.close();
-                return;
-              }
-
-              // Trigger server-side script generation API (it replaces existing script if any)
-              try {
-                // Call internal API with absolute origin derived from request
-                const origin = new URL(request.url).origin;
-                const res = await fetch(`${origin}/api/scripts`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'cookie': request.headers.get('cookie') || '' },
-                  body: JSON.stringify({ planId, prompt: body.message, desiredMinutes, sectionsRequested: desiredSections })
-                });
-                if (!res.ok) {
-                  const err = await res.json().catch(() => ({}));
-                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.error || 'Script generation failed' })}\n\n`));
-                  controller.close();
-                  return;
-                }
-              } catch (e) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Script generation request failed' })}\n\n`));
-                controller.close();
-                return;
-              }
-
-              // Inform UI to refresh script
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'script_generated' })}\n\n`));
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
-              controller.close();
-            } catch (e) {
-              console.error('Script generation flow failed:', e);
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Script generation failed' })}\n\n`));
-              controller.close();
+          if (isScript) {
+            const urlMatch = (body.currentUrl || '').match(/planner\/video\/([^/]+)/);
+            const planId = urlMatch ? urlMatch[1] : undefined;
+            if (!planId) {
+              return NextResponse.json({ error: 'Unable to determine planId from URL' }, { status: 400 });
             }
-          }
-        });
 
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-          },
-        });
+            const stream = new ReadableStream({
+              async start(controller) {
+                const encoder = new TextEncoder();
+                try {
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'script_generating' })}\n\n`));
+                  const origin = new URL(request.url).origin;
+                  const res = await fetch(`${origin}/api/scripts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'cookie': request.headers.get('cookie') || '' },
+                    body: JSON.stringify({ planId, prompt: body.message, desiredMinutes, sectionsRequested: desiredSections })
+                  });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err?.error || 'Script generation failed' })}\n\n`));
+                    controller.close();
+                    return;
+                  }
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'script_generated' })}\n\n`));
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+                  controller.close();
+                } catch (e) {
+                  console.error('Script generation flow failed:', e);
+                  controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Script generation failed' })}\n\n`));
+                  controller.close();
+                }
+              }
+            });
+
+            return new Response(stream, {
+              headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+              },
+            });
+          }
+          // If not a script request, fall through to normal chat flow.
+        } catch (e) {
+          console.warn('Script classification failed; continuing with normal chat:', e);
+        }
       }
     }
 

@@ -227,12 +227,20 @@ async function buildSystemPrompt(context: {
   const channelLine = context.channelMeta
     ? `Channel: ${context.channelMeta.title || "(untitled)"} (YouTube ID: ${context.channelMeta.externalId || "unknown"})`
     : "";
-  const profile = context.memoryProfile
-    ? `User Goals: ${context.memoryProfile.goals || ""}\nPreferences: ${context.memoryProfile.preferences || ""}\nConstraints: ${context.memoryProfile.constraints || ""}`
-    : "";
+  const clean = (v?: string) => (v || "").replace(/^\s*(Goals?:|Preferences?:|Constraints?:)\s*/i, "").trim();
+  const goals = clean(context.memoryProfile?.goals);
+  const prefs = clean(context.memoryProfile?.preferences);
+  const cons = clean(context.memoryProfile?.constraints);
+  const profileLines = [
+    goals ? `User Goals: ${goals}` : "",
+    prefs ? `Preferences: ${prefs}` : "",
+    cons ? `Constraints: ${cons}` : "",
+  ].filter(Boolean);
+  const profile = profileLines.length ? profileLines.join("\n") : "";
   const stats = context.statsSummary ? `Latest Stats: ${context.statsSummary}` : "";
   const about = context.aboutText ? `About: ${context.aboutText}` : "";
-  const titles = context.recentTitles?.length ? `Recent Titles: ${context.recentTitles.slice(0, 6).join(", ")}` : "";
+  const uniqueTitles = Array.from(new Set((context.recentTitles || []).map(t => (t || "").trim())));
+  const titles = uniqueTitles.length ? `Recent Titles: ${uniqueTitles.slice(0, 6).join(", ")}` : "";
   const strategy = context.strategyPlan ? `Current Strategy Plan (persisted):\n${context.strategyPlan}` : "";
   const base = await getPrompt('neria_messages_system');
   return [

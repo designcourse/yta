@@ -3,6 +3,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useNeria } from './NeriaContext';
 import ContextIndicator from './ContextIndicator';
+import NeriaDebugContext from './NeriaDebugContext';
+import { createSupabaseBrowserClient } from '@/utils/supabase/client';
 
 // Simple function to convert markdown links to clickable HTML
 function parseMarkdownLinks(text: string): React.ReactElement {
@@ -65,6 +67,30 @@ const NeriaContainer: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [contextPercentage, setContextPercentage] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Admin debug state
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showDebugContext, setShowDebugContext] = useState(false);
+  const supabase = createSupabaseBrowserClient();
+
+  // Check if user is admin
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data: roleRow } = await supabase
+          .from('google_accounts')
+          .select('role_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .maybeSingle();
+        const { data: roles } = await supabase.from('user_roles').select('id,name');
+        const adminRoleId = roles?.find(r => r.name === 'admin')?.id;
+        setIsAdmin(!!adminRoleId && roleRow?.role_id === adminRoleId);
+      } catch {}
+    })();
+  }, [supabase]);
 
   // When thumbnail mode is activated, show a guiding message and prevent normal chat routing
   useEffect(() => {
@@ -666,17 +692,35 @@ const NeriaContainer: React.FC = () => {
                 </div>
               </div>
               
-              {/* Context Indicator */}
-              {contextPercentage >= 1 && (
-                <div className="flex items-center space-x-2">
+              {/* Context Indicator and Debug Button */}
+              <div className="flex items-center space-x-2">
+                {contextPercentage >= 1 && (
                   <ContextIndicator 
                     percentage={contextPercentage}
                     size={36}
                     strokeWidth={3}
                     className="opacity-90"
                   />
-                </div>
-              )}
+                )}
+                
+                {/* Admin Debug Button */}
+                {isAdmin && threadId && currentChannelId && (
+                  <button
+                    onClick={() => {
+                      console.log('Debug button clicked:', { threadId, currentChannelId, isAdmin });
+                      setShowDebugContext(true);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    className="w-8 h-8 flex items-center justify-center text-white/70 hover:text-white transition-colors rounded-full hover:bg-white/10"
+                    title="Debug Context (Admin Only)"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 2L2 7V10C2 16 6 20.9 12 22C18 20.9 22 16 22 10V7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M12 8V12L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                )}
+              </div>
               
               {/* Detach Window Button */}
               <button 
@@ -830,6 +874,14 @@ const NeriaContainer: React.FC = () => {
           </div>
         )}
       </div>
+      
+      {/* Debug Context Modal */}
+      <NeriaDebugContext
+        threadId={threadId}
+        channelId={currentChannelId}
+        isVisible={showDebugContext}
+        onClose={() => setShowDebugContext(false)}
+      />
     </div>
   );
 };

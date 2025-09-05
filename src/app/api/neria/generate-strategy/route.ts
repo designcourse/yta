@@ -93,13 +93,20 @@ export async function POST(request: Request) {
     const modelConfig = { provider: "openai", model: "gpt-4o" };
     const client = getClient(modelConfig.provider);
     const tpl = await getPrompt('strategy_generation');
+    // Build and log analytics summary for debugging in /collection
+    const analyticsSummary = JSON.stringify(analyticsData).slice(0, 1000);
+    try {
+      console.log('[Strategy][Analytics] analyticsData:', analyticsData);
+      console.log('[Strategy][Analytics] analytics_summary:', analyticsSummary);
+    } catch {}
+
     const strategyPrompt = renderTemplate(tpl, {
       channel_title: channelRecord.title,
       stats_line: `${channelRecord.subscriber_count?.toLocaleString()} subscribers, ${channelRecord.video_count} videos, ${channelRecord.view_count?.toLocaleString()} views`,
       about_text: aboutText || 'Not provided',
       recent_titles: recentTitles.slice(0, 5).join(', ') || 'None available',
       answers_block: (answers || []).map(a => `Q: ${a.question}\nA: ${a.answer}`).join('\n\n'),
-      analytics_summary: JSON.stringify(analyticsData).slice(0, 1000),
+      analytics_summary: analyticsSummary,
     });
 
     const completion = await client.chat.completions.create({
