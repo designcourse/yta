@@ -63,6 +63,12 @@ button, .border {
   animation: heroContainerFadeIn 600ms ease-out 300ms forwards;
 }
 
+/* Slide timer bar animation helper */
+.slide-timer-bar {
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
 /* Generic fade-in utility with overridable timing via inline styles */
 @keyframes fadeIn {
   from { opacity: 0; }

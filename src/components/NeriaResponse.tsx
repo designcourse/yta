@@ -229,12 +229,12 @@ export default function NeriaResponse({ response, isVisible, onComplete, isStrat
     <div className="w-full">
       <div
         ref={containerRef}
-        className="mx-auto items-end w-full max-w-[1800px] px-[clamp(16px,5vw,200px)] py-[clamp(24px,5vw,100px)] flex flex-wrap gap-16"
+        className="mx-auto items-end w-full max-w-[1800px]  py-[clamp(24px,5vw,100px)] flex flex-wrap gap-16"
       >
         <div className="flex-1 min-w-0 text-black pr-[clamp(16px,3vw,48px)] overflow-visible hero-fade-in">
 
 
-          <div className={`font-normal leading-[1.1] break-normal ${isStrategy ? 'text-[clamp(20px,2.5vw,40px)]' : 'text-[clamp(24px,3vw,48px)]'}`}>
+          <div className={`font-normal leading-[1.4] break-normal ${isStrategy ? 'text-[clamp(20px,2.5vw,40px)]' : 'text-[clamp(24px,3vw,48px)]'}`}>
             {batches.map((batch) => {
               // For short responses (questions), show all batches that have been reached
               const isShortResponse = batches.length <= 2;

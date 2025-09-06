@@ -56,7 +56,7 @@ export default function YouTubeCallbackPage() {
             if (channelIds && channelIds.length > 0) {
               setStatus("Success! Redirecting to data collection...");
               setTimeout(() => {
-                window.location.href = `/dashboard/collection?channelId=${channelIds[0]}`;
+                window.location.href = `/collection?channelId=${channelIds[0]}`;
               }, 2000);
             } else {
               setStatus("Success! Redirecting to dashboard...");

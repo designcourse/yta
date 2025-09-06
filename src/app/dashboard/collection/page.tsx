@@ -283,25 +283,10 @@ export default function CollectionPage() {
     }
   };
 
-  return (
-    <div className="relative min-h-screen">
-      <div>
-        <CollectionHero 
-          neriaResponse={neriaResponse} 
-          onNeriaComplete={handleNeriaComplete}
-          onExitComplete={handleExitComplete}
-          isStrategy={displayMode === 'strategy' || displayMode === 'refinement'}
-        />
-      </div>
-      {(showPrompt || isTransitioning) && displayMode !== 'complete' && (
-        <PromptBar
-          value={answerText}
-          placeholder={currentQuestion || 'Type your answer...'}
-          onChange={setAnswerText}
-          sending={sending}
-          onSend={handleSendAnswer}
-        />
-      )}
-    </div>
-  );
+  if (channelId) {
+    if (typeof window !== 'undefined') {
+      window.location.replace(`/collection?channelId=${channelId}`);
+    }
+  }
+  return null;
 }

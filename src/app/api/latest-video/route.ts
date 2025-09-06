@@ -66,31 +66,47 @@ export async function GET(request: Request) {
 
     const accessToken = tokenResult.accessToken;
 
-    // Get the latest video from the channel
-    const searchResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&order=date&maxResults=1&type=video`,
-      { 
-        headers: { 
+    // Resolve uploads playlist and get the latest upload via playlistItems.list (cheap)
+    const channelRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}`,
+      {
+        headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
-        } 
+        }
       }
     );
-
-    if (!searchResponse.ok) {
-      const error = await searchResponse.text();
-      console.error("YouTube Search API failed:", error);
-      return NextResponse.json({ error: "Failed to fetch latest video" }, { status: 500 });
+    if (!channelRes.ok) {
+      const error = await channelRes.text();
+      console.error("YouTube channels.list failed:", error);
+      return NextResponse.json({ error: "Failed to fetch channel details" }, { status: 500 });
+    }
+    const channelJson = await channelRes.json();
+    const uploadsPlaylistId = channelJson?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+    if (!uploadsPlaylistId) {
+      return NextResponse.json({ error: "Uploads playlist not found for channel" }, { status: 404 });
     }
 
-    const searchData = await searchResponse.json();
-    const latestVideo = searchData.items?.[0];
-
-    if (!latestVideo) {
+    const playlistItemsRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${uploadsPlaylistId}&maxResults=1`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    if (!playlistItemsRes.ok) {
+      const error = await playlistItemsRes.text();
+      console.error("YouTube playlistItems.list failed:", error);
+      return NextResponse.json({ error: "Failed to fetch latest upload" }, { status: 500 });
+    }
+    const playlistItemsJson = await playlistItemsRes.json();
+    const firstItem = playlistItemsJson?.items?.[0];
+    const videoId = firstItem?.contentDetails?.videoId || firstItem?.snippet?.resourceId?.videoId;
+    if (!videoId) {
       return NextResponse.json({ error: "No videos found for this channel" }, { status: 404 });
     }
-
-    const videoId = latestVideo.id.videoId;
 
     // Get video statistics
     const videoResponse = await fetch(

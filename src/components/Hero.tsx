@@ -101,7 +101,7 @@ export default function Hero() {
               ))}
             </span>
           </h1>
-          <p className="text-sm opacity-80 fade-in" style={{ animationDelay: "3.6s" }}>
+          <p className="text-3xl opacity-80 fade-in" style={{ animationDelay: "3.6s" }}>
             The world’s the most intelligent AI-Driven YouTube strategist.
           </p>
         </div>
@@ -117,7 +117,6 @@ export default function Hero() {
             </span>
             <span className="text-[clamp(20px,1.4vw,28px)] font-bold">Get Started</span>
           </Link>
-          <span className="text-xs text-black">Is this safe?</span>
         </div>
       </div>
     </section>

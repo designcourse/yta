@@ -150,3 +150,33 @@ When examining database schema with Supabase MCP:
 - Test edge cases, especially authentication flows
 
 This context document should guide all development decisions and ensure consistency across the YouTube Analytics App codebase.
+
+## Feature: Collection system (/collection)
+
+### Overview
+- Page: `src/app/collection/page.tsx`
+- API: `src/app/api/collection/preview/route.ts`
+- Purpose: Present a multi-slide collection preview with Neria’s animated greeting and channel metadata.
+
+### Timing & Animation
+- Slide 1 timing is dynamic: waits for `NeriaResponse` animation to finish via `onComplete`, then adds a 5s buffer before auto-advancing.
+- Other slides default to 9000ms.
+- Progress bar is inside the metadata section and is driven via `requestAnimationFrame` scaling on the X axis.
+- Metadata entrance animation triggers on first data load: container is `overflow-y-hidden`; title row, description, each stat label, and each stat value fade in and translate up with a slight stagger.
+- Reduced motion: if `prefers-reduced-motion` is enabled, the auto-advance/progress animation is disabled.
+
+### UI Details
+- Pagination dots: inactive have transparent fill with a 2px black border; active have black fill and a 2px black border.
+- Description is limited to the first sentence of the channel description.
+- Stat formatting:
+  - 0–999: full number (e.g., 850)
+  - 1,000–99,999: 1 decimal with k (e.g., 2.5k, 68.3k)
+  - 100,000–999,999: whole-number k (e.g., 258k)
+  - ≥1,000,000: 1 decimal with M (e.g., 1.1M)
+- Stat icons use fixed height with `object-contain` to preserve aspect ratio and align labels; metadata block is top-aligned.
+- Layout includes ~70px bottom padding under the metadata for breathing room.
+
+### Key Components/State
+- Uses `NeriaResponse` for animated text with batching and punctuation-aware delays.
+- Local state: `activeSlide`, `slide1Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`.
+- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=5`.

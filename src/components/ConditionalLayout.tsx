@@ -17,11 +17,13 @@ export default function ConditionalLayout({ children }: ConditionalLayoutProps) 
                           pathname.startsWith("/account") || 
                           pathname.startsWith("/support");
 
+  const isCollectionPage = pathname.startsWith('/collection');
+
   return (
     <div className="relative z-10 h-screen flex flex-col">
       {!isDashboardPage && <Header />}
       <main className="flex-1 overflow-hidden pointer-events-auto">{children}</main>
-      {!isDashboardPage && <Footer />}
+      {!isDashboardPage && !isCollectionPage && <Footer />}
     </div>
   );
 }
