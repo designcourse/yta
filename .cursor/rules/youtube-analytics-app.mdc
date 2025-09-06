@@ -176,7 +176,36 @@ This context document should guide all development decisions and ensure consiste
 - Stat icons use fixed height with `object-contain` to preserve aspect ratio and align labels; metadata block is top-aligned.
 - Layout includes ~70px bottom padding under the metadata for breathing room.
 
+### Slides Implementation
+
+#### Slide 1 (Channel Overview)
+- Channel metadata with animated entrance
+- Neria greeting with system prompt `collection_greeting`
+- Timer starts after animation completes + 5s buffer
+
+#### Slide 2 (Top Performer Analysis)
+- Left: 250px video card showing best performer by viewsPerDay (90d normalized)
+- Right: Neria insight using system prompt `collection_winners_theme`
+- Timer starts after Neria animation completes
+- Analyzes up to 10 top video titles to infer dominant successful themes
+
+#### Slide 3 (Underperformer Analysis)
+- Left: 250px video card showing worst performer by viewsPerDay
+- Right: Neria diagnosis using system prompt `collection_losers_theme`
+- Lazy loads single worst video via `/api/collection/losers`
+- Timer pauses during loading, starts after animation completes
+
+### API Endpoints
+- `/api/collection/preview`: Main data bundle (channel + analytics + winners + slide text)
+- `/api/collection/losers`: Lazy load worst performer details for Slide 3
+- Both use YouTube Analytics API with 90-day window and viewsPerDay ranking
+
+### System Prompts Integration
+- All slide text generated server-side using `system_prompts` table
+- Prompts editable via dashboard system-prompts page
+- Fallback text available if prompt generation fails
+
 ### Key Components/State
-- Uses `NeriaResponse` for animated text with batching and punctuation-aware delays.
-- Local state: `activeSlide`, `slide1Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`.
-- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=5`.
+- Uses `NeriaResponse` for animated text with batching and punctuation-aware delays
+- Local state: `activeSlide`, `slide1Done`, `slide2Done`, `slide3Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`
+- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=5`

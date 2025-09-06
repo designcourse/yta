@@ -99,22 +99,33 @@ export async function GET(request: Request) {
     startDate.setDate(endDate.getDate() - 90);
     const formatDate = (d: Date) => d.toISOString().split("T")[0];
 
-    const analyticsParams = new URLSearchParams({
-      // Use the explicit channelId from query to match existing working routes
-      ids: `channel==${channelId}`,
+    const baseParams = {
       startDate: formatDate(startDate),
       endDate: formatDate(endDate),
       dimensions: "video",
       metrics: "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained",
       maxResults: "200",
-    });
+      sort: "-views",
+    } as const;
 
-    const analyticsRes = await fetch(
-      `https://youtubeanalytics.googleapis.com/v2/reports?${analyticsParams.toString()}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    if (!analyticsRes.ok) {
-      const t = await analyticsRes.text();
+    const attempts = [
+      new URLSearchParams({ ...baseParams, ids: `channel==${channelId}` } as any),
+      new URLSearchParams({ ...baseParams, ids: `channel==MINE` } as any),
+    ];
+
+    let analyticsRes: Response | null = null;
+    let lastErrText: string | null = null;
+    for (const params of attempts) {
+      const res = await fetch(
+        `https://youtubeanalytics.googleapis.com/v2/reports?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (res.ok) { analyticsRes = res; break; }
+      lastErrText = await res.text().catch(() => null);
+    }
+
+    if (!analyticsRes || !analyticsRes.ok) {
+      const t = lastErrText || "";
       console.error("[collection.preview] analytics.reports failed", t);
       return NextResponse.json({
         channel: {
@@ -155,7 +166,7 @@ export async function GET(request: Request) {
       return s.length % 2 === 0 ? (s[mid - 1] + s[mid]) / 2 : s[mid];
     };
 
-    const ctrMedian = 0; // Not available with current metrics set
+    const ctrMedian = 0; // impressions CTR not available in this report
     const avgPctMedian = median(rows.map(r => r.averageViewPercentage || 0));
 
     // Compute daysSinceUploadWithin90 after we fetch publishedAt per video; initially default to 90.
@@ -171,6 +182,8 @@ export async function GET(request: Request) {
     provisional.sort((a, b) => b.viewsPerDay - a.viewsPerDay);
     const topIds = provisional.slice(0, 10).map(x => x.id);
     const bottomIds = provisional.slice(-10).map(x => x.id);
+    const worst = provisional.reduce((min, cur) => (cur.viewsPerDay < min.viewsPerDay ? cur : min), provisional[0] || { id: '', viewsPerDay: Number.POSITIVE_INFINITY });
+    const primaryLoserId = worst?.id || (bottomIds.length > 0 ? bottomIds[bottomIds.length - 1] : '');
 
     // 3) videos.list for winners only, refine viewsPerDay with exact days in window since upload
     let winners: any[] = [];
@@ -217,6 +230,49 @@ export async function GET(request: Request) {
       }
     }
 
+    // Generate a theme line for Slide 2 based on winners
+    let slide2Text = '';
+    let slide3Text = '';
+    try {
+      const themeTpl = await getPrompt('collection_winners_theme');
+      const winnersTitles = JSON.stringify(winners.map(w => w.title));
+      const themeRendered = renderTemplate(themeTpl, {
+        winners_titles: winnersTitles,
+        channel_title: channel?.snippet?.title || ''
+      });
+      const client = getClient('openai');
+      const themeComp = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are Neria, a concise YouTube coach.' },
+          { role: 'user', content: themeRendered }
+        ],
+        max_tokens: 80,
+        temperature: 0.4,
+      });
+      slide2Text = themeComp.choices?.[0]?.message?.content?.trim() || '';
+      // losers theme
+      const losersTitles = JSON.stringify(bottomIds.map(id => id).slice(0, 10));
+      const losersTpl = await getPrompt('collection_losers_theme');
+      const losersRendered = renderTemplate(losersTpl, {
+        losers_titles: losersTitles,
+        channel_title: channel?.snippet?.title || ''
+      });
+      const losersComp = await client.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: 'You are Neria, a concise YouTube coach.' },
+          { role: 'user', content: losersRendered }
+        ],
+        max_tokens: 80,
+        temperature: 0.4,
+      });
+      slide3Text = losersComp.choices?.[0]?.message?.content?.trim() || '';
+    } catch (e) {
+      slide2Text = '';
+      slide3Text = '';
+    }
+
     // Generate a short description and a custom slide 1 line via OpenAI using system_prompts
     const payload = {
       channel: {
@@ -231,7 +287,10 @@ export async function GET(request: Request) {
       analytics90d: { baseline: { ctrMedian, avgPctMedian } },
       winners,
       loserIds: bottomIds,
+      primaryLoserId,
       slide1Text,
+      slide2Text,
+      slide3Text,
     };
 
     previewCache.set(cacheKey, { expiresAt: Date.now() + TTL_MS, payload });
