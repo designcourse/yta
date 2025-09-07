@@ -187,16 +187,38 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
               Thumbnail Content
             </Link>
             {isAdmin && (
-              <Link
-                href={`/dashboard/${encodeURIComponent(currentChannelId)}/system-prompts`}
-                className={`block text-base ${
-                  isActivePath(`/dashboard/${currentChannelId}/system-prompts`)
-                    ? "text-gray-900 font-medium"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                System Prompts
-              </Link>
+              <>
+                <Link
+                  href={`/dashboard/${encodeURIComponent(currentChannelId)}/system-prompts`}
+                  className={`block text-base ${
+                    isActivePath(`/dashboard/${currentChannelId}/system-prompts`)
+                      ? "text-gray-900 font-medium"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  System Prompts
+                </Link>
+                <Link
+                  href={`/dashboard/${encodeURIComponent(currentChannelId)}/workflows`}
+                  className={`block text-base ${
+                    isActivePath(`/dashboard/${currentChannelId}/workflows`)
+                      ? "text-gray-900 font-medium"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  Workflow Monitor
+                </Link>
+                <Link
+                  href={`/dashboard/${encodeURIComponent(currentChannelId)}/workflow-editor`}
+                  className={`block text-base ${
+                    isActivePath(`/dashboard/${currentChannelId}/workflow-editor`)
+                      ? "text-gray-900 font-medium"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  Workflow Editor
+                </Link>
+              </>
             )}
           </nav>
         )}

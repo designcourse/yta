@@ -1,0 +1,377 @@
+---
+alwaysApply: false
+---
+# Neria Workflow Engine - Local Windmill Alternative
+
+## Overview
+Create a local workflow engine inspired by Windmill for the YouTube Analytics App. This will allow complex data processing flows to be managed locally with visual representation and monitoring, specifically optimized for Neria's AI-powered analytics.
+
+## Architecture Goals
+
+### Core Components
+1. **Workflow Definition System** - JSON/YAML based workflow definitions stored in codebase
+2. **Step Execution Engine** - Local execution of workflow steps with parallel processing
+3. **Visual Flow Editor** - React-based UI for creating/editing workflows (implemented)
+4. **Monitoring & Logging** - Built-in step tracking, timing, and error handling
+5. **State Management** - Step output caching and dependency resolution
+
+### Integration Points
+- **YouTube API Steps** - Pre-built steps for channels, analytics, video data
+- **AI Processing Steps** - OpenAI integration for slide text generation, analysis
+- **Database Steps** - Supabase operations for caching and user data
+- **Neria Context** - Integration with existing Neria chat system
+
+## Implementation Plan
+
+### Phase 1: Core Workflow Engine
+```typescript
+// src/utils/neria-workflows/types.ts
+interface WorkflowStep {
+  id: string;
+  type: 'youtube-api' | 'openai' | 'transform' | 'parallel' | 'condition';
+  name: string;
+  inputs: Record<string, any>;
+  outputs: string[];
+  config: Record<string, any>;
+  dependencies: string[];
+}
+
+interface Workflow {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  steps: WorkflowStep[];
+  triggers: WorkflowTrigger[];
+}
+
+interface WorkflowExecution {
+  id: string;
+  workflowId: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startTime: Date;
+  endTime?: Date;
+  stepResults: Record<string, any>;
+  errors: WorkflowError[];
+}
+```
+
+### Phase 2: Pre-built Step Types
+
+#### YouTube API Steps
+- `youtube-channel-data` - Fetch channel information
+- `youtube-analytics` - Get analytics data with date ranges
+- `youtube-video-details` - Batch fetch video metadata
+- `youtube-search` - Search for videos/channels
+
+#### AI Processing Steps  
+- `openai-chat` - Generic OpenAI chat completion
+- `neria-greeting` - Specialized greeting generation
+- `neria-analysis` - Content theme analysis
+- `neria-insights` - Performance insights generation
+
+#### Transform Steps
+- `data-mapper` - Transform data structures
+- `calculator` - Perform calculations (viewsPerDay, rankings)
+- `filter` - Filter arrays/objects by criteria
+- `aggregator` - Sum, average, median calculations
+
+### Phase 3: Workflow Definitions
+
+#### YouTube Collection Workflow
+```yaml
+# workflows/youtube-collection-analytics.yaml
+id: youtube-collection-analytics
+name: YouTube Collection Analytics
+version: 1.0.0
+description: Complete YouTube channel analysis for collection page
+
+steps:
+  - id: fetch-channel
+    type: youtube-api
+    name: Fetch Channel Data
+    config:
+      endpoint: channels
+      params:
+        part: snippet,statistics
+        mine: true
+    inputs:
+      accessToken: $input.accessToken
+    outputs: [channelData]
+
+  - id: fetch-analytics
+    type: youtube-api  
+    name: Fetch Analytics Data
+    config:
+      endpoint: analytics-reports
+      params:
+        dimensions: video
+        metrics: views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained
+        maxResults: 200
+        sort: -views
+        days: 90
+    inputs:
+      accessToken: $input.accessToken
+      channelId: $input.channelId
+    outputs: [analyticsRows]
+    dependencies: [fetch-channel]
+
+  - id: process-winners
+    type: transform
+    name: Process Top Performers
+    config:
+      script: |
+        const processed = analyticsRows.map(row => ({
+          video: row[0],
+          views: row[1],
+          viewsPerDay: row[1] / 90
+        }));
+        processed.sort((a, b) => b.viewsPerDay - a.viewsPerDay);
+        return {
+          topIds: processed.slice(0, 10).map(p => p.video),
+          bottomIds: processed.slice(-10).map(p => p.video)
+        };
+    inputs:
+      analyticsRows: $steps.fetch-analytics.analyticsRows
+    outputs: [topIds, bottomIds]
+    dependencies: [fetch-analytics]
+
+  - id: fetch-video-details
+    type: youtube-api
+    name: Fetch Video Details
+    config:
+      endpoint: videos
+      params:
+        part: snippet,contentDetails
+    inputs:
+      accessToken: $input.accessToken
+      videoIds: $steps.process-winners.topIds
+    outputs: [videoDetails]
+    dependencies: [process-winners]
+
+  - id: generate-insights
+    type: parallel
+    name: Generate AI Insights
+    steps:
+      - id: greeting
+        type: openai-chat
+        config:
+          model: gpt-4o-mini
+          system: "You are Neria, a warm, concise YouTube coach."
+          maxTokens: 120
+        inputs:
+          prompt: "Generate greeting for {{channelData.title}} with {{channelData.subs}} subscribers"
+          channelData: $steps.fetch-channel.channelData
+        outputs: [slide1Text]
+        
+      - id: theme-analysis  
+        type: openai-chat
+        config:
+          model: gpt-4o-mini
+          system: "You are Neria, a concise YouTube coach."
+          maxTokens: 80
+        inputs:
+          prompt: "Analyze winning themes from: {{videoTitles}}"
+          videoTitles: $steps.fetch-video-details.videoDetails.*.title
+        outputs: [slide2Text]
+    dependencies: [fetch-channel, fetch-video-details]
+
+  - id: build-response
+    type: transform
+    name: Build Final Response
+    config:
+      script: |
+        return {
+          channel: channelData,
+          analytics90d: { baseline: { ctrMedian: 0, avgPctMedian: 50 } },
+          winners: videoDetails.map(video => ({
+            id: video.id,
+            title: video.snippet.title,
+            // ... mapping logic
+          })),
+          loserIds: bottomIds,
+          slide1Text,
+          slide2Text,
+          slide3Text: ""
+        };
+    inputs:
+      channelData: $steps.fetch-channel.channelData
+      videoDetails: $steps.fetch-video-details.videoDetails
+      bottomIds: $steps.process-winners.bottomIds
+      slide1Text: $steps.generate-insights.greeting.slide1Text
+      slide2Text: $steps.generate-insights.theme-analysis.slide2Text
+    outputs: [finalResponse]
+    dependencies: [fetch-channel, fetch-video-details, process-winners, generate-insights]
+```
+
+### Phase 4: Execution Engine
+
+#### Core Engine
+```typescript
+// src/utils/neria-workflows/engine.ts
+class NeriaWorkflowEngine {
+  async executeWorkflow(workflowId: string, inputs: Record<string, any>): Promise<WorkflowExecution>
+  async executeStep(step: WorkflowStep, context: ExecutionContext): Promise<StepResult>
+  async resolveInputs(step: WorkflowStep, context: ExecutionContext): Promise<Record<string, any>>
+  private buildDependencyGraph(workflow: Workflow): DependencyGraph
+  private executeParallelSteps(steps: WorkflowStep[], context: ExecutionContext): Promise<StepResult[]>
+}
+```
+
+#### Step Executors
+```typescript
+// src/utils/neria-workflows/executors/
+- youtube-api-executor.ts
+- openai-executor.ts  
+- transform-executor.ts
+- parallel-executor.ts
+```
+
+### Phase 5: API Integration
+
+#### Workflow API Route
+```typescript
+// src/app/api/neria-workflows/[workflowId]/route.ts
+export async function POST(request: Request, { params }: { params: { workflowId: string } }) {
+  const { inputs } = await request.json();
+  const engine = new NeriaWorkflowEngine();
+  const execution = await engine.executeWorkflow(params.workflowId, inputs);
+  return NextResponse.json(execution);
+}
+```
+
+#### Collection Integration
+```typescript
+// Update src/app/api/collection/preview/route.ts
+const execution = await fetch('/api/neria-workflows/youtube-collection-analytics', {
+  method: 'POST',
+  body: JSON.stringify({ inputs: { channelId, userId, accessToken } })
+});
+```
+
+## Benefits Over External Windmill
+
+### Development Experience
+- **Version Control** - Workflows stored in git with your codebase
+- **Local Development** - No external dependencies for development
+- **IDE Integration** - Full TypeScript support and debugging
+- **Custom Steps** - Easy to add app-specific step types
+
+### Performance & Reliability
+- **No Network Calls** - Reduced latency for workflow execution
+- **Parallel Processing** - Optimized for your specific use cases
+- **Caching Integration** - Built-in integration with your existing cache layer
+- **Error Handling** - Custom error handling for YouTube/OpenAI APIs
+
+### Monitoring & Debugging
+- **Detailed Logging** - Step-by-step execution logs
+- **Performance Metrics** - Track step execution times
+- **Visual Debugging** - See workflow state at each step
+- **Integration with Neria** - Workflow status in chat interface
+
+## Future Enhancements
+
+### Visual Workflow Editor
+- React-based drag-and-drop workflow builder
+- Real-time workflow visualization
+- Step configuration panels
+- Workflow testing interface
+
+### Advanced Features
+- **Conditional Steps** - Branch execution based on data
+- **Loop Steps** - Process arrays/batches
+- **Webhook Triggers** - External workflow triggers
+- **Scheduled Execution** - Cron-like workflow scheduling
+- **Workflow Composition** - Reusable sub-workflows
+
+### Neria Integration
+- **Chat Commands** - Trigger workflows from Neria chat
+- **Status Updates** - Real-time workflow progress in chat
+- **Result Interpretation** - Neria explains workflow results
+- **Workflow Suggestions** - AI-suggested workflow optimizations
+
+## Migration Strategy
+
+1. **Start Small** - Implement core engine with YouTube collection workflow
+2. **Parallel Development** - Keep existing API routes during development
+3. **Gradual Migration** - Move complex operations to workflows one by one
+4. **Performance Testing** - Compare workflow vs direct API performance
+5. **Full Replacement** - Replace direct API calls with workflow executions
+
+This creates a powerful, local workflow system that gives you the benefits of Windmill while keeping everything in your codebase and optimized for your specific YouTube analytics use cases.
+
+---
+
+## Current Implementation (Editor, Compiler, Persistence, Monitor)
+
+### Visual Workflow Editor (implemented)
+- Page: `src/app/dashboard/[channelId]/workflow-editor/page.tsx`
+- Components: `src/components/WorkflowEditor/{NodePalette,WorkflowCanvas,WorkflowNode}.tsx`
+- Features:
+  - Drag-and-drop nodes from a palette (YouTube, OpenAI, Database, External)
+  - Click green output then blue input to connect; dashed line shows active connection
+  - Multiple connections allowed from one output; outputs represent data fields, not edge count
+  - Load/Save workflows to Supabase (see Persistence below)
+  - If a workflow has no stored visual nodes, the editor auto-reconstructs a graph from its compiled `definition.steps`
+
+### Node Palette / Endpoints Mapping
+- Declared in `src/utils/neria-workflows/api-discovery.ts`
+- Key endpoint IDs used by the editor and compiler mapping:
+  - YouTube: `youtube-channels` → channels, `youtube-analytics` → analytics-reports, `youtube-videos` → videos, `youtube-search` → search
+  - OpenAI: `openai-chat` (chat completion), `openai-analysis` (content analysis; requires `analysisType`, default: themes)
+  - Transform: `transform-data` (JS script; see Transform below)
+- Default input injection by compiler: `accessToken`, `channelId` where required
+
+### Compiler (editor → executable workflow)
+- `src/utils/neria-workflows/workflow-compiler.ts`
+- Builds a dependency graph from canvas connections
+- Generates `Workflow.steps` with proper `type`, `config`, `inputs`, `outputs`, `dependencies`
+- Heuristics to wire dependency outputs to likely input keys (`content`, `data`, `videoIds`, …)
+
+### Persistence (Supabase)
+- Table: `public.neria_workflows`
+  - Columns: `id uuid pk`, `key text unique`, `name text`, `description text`, `version text`, `definition_json jsonb`, `visual_json jsonb`, timestamps
+  - RLS: authenticated users can select/insert/update/delete (tighten later as needed)
+- Storage utils: `src/utils/neria-workflows/storage.ts` (list, get, save, delete)
+- API routes:
+  - `GET/POST /api/neria-workflows/workflows` (list, create)
+  - `GET/PUT/DELETE /api/neria-workflows/workflows/[id]` (fetch, update, delete)
+  - `GET/POST /api/neria-workflows/workflows/import` (seed registry-defined workflows)
+- Editor wiring:
+  - Load dropdown calls list/get
+  - Save persists both `definition_json` (compiled) and `visual_json.nodes` (canvas state)
+
+### Importing existing workflows
+- Registry: `src/utils/neria-workflows/workflows/index.ts`
+- Seed DB with existing definitions: open `/api/neria-workflows/workflows/import` while logged in
+- After import, use the editor Load dropdown to open and edit
+
+### Execution Monitor (implemented)
+- Page: `src/app/dashboard/[channelId]/workflows`
+- Shows executions, flow diagram, per-step results (expandable)
+- Backed by in-memory singleton store `src/utils/neria-workflows/execution-store.ts` (global instance for API routes)
+
+### Transform Step (editor card: "Transform Data")
+- Executor: `src/utils/neria-workflows/executors/transform-executor.ts`
+- Runs `config.script` (JS) with a safe context providing:
+  - Inputs bound as variables; `steps` (prior step results); `workflowInputs` (top-level inputs)
+  - Helpers: `formatNumber`, `sortBy`, `groupBy`, `sum`, `average`, `median`, plus `Math`, `Date`, `JSON`
+- The script must `return { ... }`; returned keys become this step’s outputs
+
+### Canvas semantics
+- "Out: N" on a node shows the number of data outputs (fields) that node produces, not the number of outgoing connections
+- A single output value can fan out to many downstream inputs; multiple blue arrows from one output is expected
+
+### Known paths and utilities
+- Editor: `workflow-editor/page.tsx`
+- Monitor: `workflows/page.tsx`
+- Compiler: `utils/neria-workflows/workflow-compiler.ts`
+- Persistence: `utils/neria-workflows/storage.ts`
+- API (workflows): `app/api/neria-workflows/workflows{,/import,/[id]}`
+- API (engine/exec): `app/api/neria-workflows/{status,test,executions,trigger/[workflowId]}`
+
+### Quick how-to
+1. Build visually → Save Workflow (persists compiled JSON + visual graph)
+2. Load existing → dropdown in editor; if only compiled exists, graph is auto-reconstructed
+3. Execute programmatically → POST `/api/neria-workflows/trigger/{workflowId}` with `{ inputs }`
+4. Monitor → `/dashboard/[channelId]/workflows`
