@@ -8,7 +8,7 @@ export class WorkflowExecutor implements StepExecutor {
     step: any,
     inputs: Record<string, any>,
     context: ExecutionContext
-  ): Promise<StepResult> {
+  ): Promise<Record<string, any>> {
     console.log(`[Workflow Step ${step.id}] Executing sub-workflow: ${step.config.workflowId}`);
     
     try {
@@ -44,23 +44,14 @@ export class WorkflowExecutor implements StepExecutor {
         result = execution.stepResults[lastStepId];
       }
 
+      // Return the result with the first output key from the step definition
+      const outputKey = step.outputs[0] || 'result';
       return {
-        success: true,
-        outputs: step.outputs.reduce((acc: Record<string, any>, outputKey: string) => {
-          acc[outputKey] = result;
-          return acc;
-        }, {}),
-        executionTime: execution.endTime && execution.startTime ? 
-          execution.endTime.getTime() - execution.startTime.getTime() : 0
+        [outputKey]: result
       };
 
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown workflow execution error',
-        outputs: {},
-        executionTime: 0
-      };
+      throw new Error(error instanceof Error ? error.message : 'Unknown workflow execution error');
     }
   }
 }

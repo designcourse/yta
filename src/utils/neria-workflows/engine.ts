@@ -13,6 +13,7 @@ import { OpenAIExecutor } from './executors/openai-executor';
 import { TransformExecutor } from './executors/transform-executor';
 import { ParallelExecutor } from './executors/parallel-executor';
 import { WorkflowExecutor } from './executors/workflow-executor';
+import staticWorkflows from './workflows';
 
 export class NeriaWorkflowEngine {
   private executors = {
@@ -240,24 +241,34 @@ export class NeriaWorkflowEngine {
 
   private async loadWorkflow(workflowId: string): Promise<Workflow> {
     try {
-      // First, try to load from database (custom/edited workflows)
-      const { getWorkflow } = await import('./storage');
-      const dbWorkflow = await getWorkflow(workflowId);
+      console.log(`[WorkflowEngine] Loading workflow: ${workflowId}`);
       
-      if (dbWorkflow) {
-        return dbWorkflow.definition;
+      // First, try to load from database (custom/edited workflows)
+      try {
+        const { getWorkflow } = await import('./storage');
+        const dbWorkflow = await getWorkflow(workflowId);
+        
+        if (dbWorkflow) {
+          console.log(`[WorkflowEngine] Found workflow in database: ${workflowId}`);
+          return dbWorkflow.definition;
+        }
+      } catch (dbError) {
+        console.warn(`[WorkflowEngine] Database workflow lookup failed for ${workflowId}:`, dbError instanceof Error ? dbError.message : String(dbError));
       }
       
       // Fallback to static definitions
-      const workflows = await import('./workflows');
-      const workflow = workflows.default[workflowId];
+      console.log(`[WorkflowEngine] Loading static workflow: ${workflowId}`);
+      console.log(`[WorkflowEngine] Available static workflows:`, Object.keys(staticWorkflows || {}));
+      const workflow = staticWorkflows[workflowId];
       
       if (!workflow) {
-        throw new Error(`Workflow not found: ${workflowId}`);
+        throw new Error(`Workflow not found: ${workflowId}. Available workflows: ${Object.keys(staticWorkflows || {}).join(', ')}`);
       }
       
+      console.log(`[WorkflowEngine] Successfully loaded workflow: ${workflowId}`);
       return workflow;
     } catch (error) {
+      console.error(`[WorkflowEngine] Failed to load workflow ${workflowId}:`, error);
       throw new Error(`Failed to load workflow ${workflowId}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

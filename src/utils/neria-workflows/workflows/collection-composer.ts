@@ -35,10 +35,11 @@ const collectionComposer: Workflow = {
       },
       inputs: {
         accessToken: '$input.accessToken',
-        channelId: '$input.channelId'
+        channelId: '$input.channelId',
+        channelTitle: '$steps.run-channel-overview.result.channel.title'
       },
       outputs: ['topPerformerResult'],
-      dependencies: []
+      dependencies: ['run-channel-overview']
     },
     {
       id: 'run-underperformer-analysis',
@@ -60,27 +61,22 @@ const collectionComposer: Workflow = {
       name: 'Compose Collection Data',
       config: {
         script: `
-          // Extract results from workflow step outputs
-          const channelData = channelOverview?.outputs?.channelResult || channelOverview?.channelResult || channelOverview;
-          const topData = topPerformer?.outputs?.topPerformerResult || topPerformer?.topPerformerResult || topPerformer;
-          const underData = underperformer?.outputs?.underperformerResult || underperformer?.underperformerResult || underperformer;
-          
           return {
-            channel: channelData?.channel || {},
-            analytics90d: topData?.analytics90d || {},
-            winners: topData?.winners || [],
-            loserIds: underData?.loserIds || [],
-            primaryLoserId: underData?.primaryLoser?.id,
-            slide1Text: channelData?.greeting || 'No greeting available',
-            slide2Text: topData?.themeAnalysis || 'No theme analysis available',
-            slide3Text: underData?.diagnosis || 'No diagnosis available'
+            channel: channelOverview?.channel || {},
+            analytics90d: topPerformer?.analytics90d || {},
+            winners: topPerformer?.winners || [],
+            loserIds: underperformer?.loserIds || [],
+            primaryLoserId: underperformer?.primaryLoser?.id,
+            slide1Text: channelOverview?.greeting || 'No greeting available',
+            slide2Text: topPerformer?.themeAnalysis || 'No theme analysis available',
+            slide3Text: underperformer?.diagnosis || 'No diagnosis available'
           };
         `
       },
       inputs: {
-        channelOverview: '$steps.run-channel-overview',
-        topPerformer: '$steps.run-top-performer-analysis', 
-        underperformer: '$steps.run-underperformer-analysis'
+        channelOverview: '$steps.run-channel-overview.channelResult',
+        topPerformer: '$steps.run-top-performer-analysis.topPerformerResult', 
+        underperformer: '$steps.run-underperformer-analysis.underperformerResult'
       },
       outputs: ['result'],
       dependencies: ['run-channel-overview', 'run-top-performer-analysis', 'run-underperformer-analysis']

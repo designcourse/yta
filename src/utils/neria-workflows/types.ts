@@ -1,6 +1,6 @@
 export interface WorkflowStep {
   id: string;
-  type: 'youtube-api' | 'openai' | 'transform' | 'parallel' | 'condition';
+  type: 'youtube-api' | 'openai' | 'transform' | 'parallel' | 'condition' | 'workflow';
   name: string;
   inputs: Record<string, any>;
   outputs: string[];
@@ -45,6 +45,14 @@ export interface StepResult {
   outputs: Record<string, any>;
   error?: string;
   executionTime: number;
+}
+
+export interface StepExecutor {
+  execute(
+    step: WorkflowStep,
+    inputs: Record<string, any>,
+    context: ExecutionContext
+  ): Promise<Record<string, any>>;
 }
 
 export interface ExecutionContext {

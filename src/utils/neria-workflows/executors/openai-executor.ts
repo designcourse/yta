@@ -8,6 +8,7 @@ export class OpenAIExecutor extends BaseExecutor {
     context: ExecutionContext
   ): Promise<Record<string, any>> {
     this.logStep(step.id, `Executing OpenAI call: ${step.name}`);
+    console.log(`[OpenAI] Step ${step.id} received inputs:`, JSON.stringify(inputs, null, 2));
     
     const config = step.config as OpenAIConfig;
     const { prompt: promptInput, ...otherInputs } = inputs;
@@ -27,8 +28,15 @@ export class OpenAIExecutor extends BaseExecutor {
       throw new Error('Prompt is required for OpenAI calls');
     }
 
+    // NEW: Process the system text with template variables as well
+    if (systemText) {
+      systemText = this.processPromptTemplate(systemText, otherInputs);
+    }
+
     // Process the prompt with template variables
     const processedPrompt = this.processPromptTemplate(promptBase, otherInputs);
+    console.log(`[OpenAI] Step ${step.id} processed prompt:`, processedPrompt);
+    console.log(`[OpenAI] Step ${step.id} system text:`, systemText);
 
     // Use the existing OpenAI utility
     const { getClient } = await import('@/utils/openai');
@@ -58,7 +66,7 @@ export class OpenAIExecutor extends BaseExecutor {
   }
 
   private processPromptTemplate(prompt: string, variables: Record<string, any>): string {
-    let processed = prompt;
+    let processed = String(prompt);
 
     // Replace {{variable}} patterns
     processed = processed.replace(/\{\{\s*([^}\s]+)\s*\}\}/g, (match, varPath) => {
@@ -84,9 +92,10 @@ export class OpenAIExecutor extends BaseExecutor {
   }
 
   private getNestedValue(obj: any, path: string): any {
-    return path.split('.').reduce((acc: any, key: string) => {
-      if (acc === undefined || acc === null) return undefined;
-      return acc[key];
-    }, obj);
+    try {
+      return path.split('.').reduce((acc: any, key: string) => (acc == null ? undefined : acc[key]), obj);
+    } catch {
+      return undefined;
+    }
   }
 }

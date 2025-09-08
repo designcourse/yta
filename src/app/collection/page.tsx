@@ -120,14 +120,8 @@ export default function CollectionPage() {
       try {
         setLoading(true);
         
-        // Try workflow API first
-        let res = await fetch(`/api/collection/preview-workflow?channelId=${encodeURIComponent(channelId)}&refresh=1`, { cache: 'no-store' });
-        
-        // Fallback to original API if workflow fails
-        if (!res.ok) {
-          console.warn('Workflow API failed, falling back to original API');
-          res = await fetch(`/api/collection/preview?channelId=${encodeURIComponent(channelId)}&refresh=1`, { cache: 'no-store' });
-        }
+        // Use workflow API only
+        const res = await fetch(`/api/collection/preview-workflow?channelId=${encodeURIComponent(channelId)}&refresh=1`, { cache: 'no-store' });
         
         if (!res.ok) throw new Error(await res.text());
         const json: PreviewPayload = await res.json();

@@ -151,6 +151,38 @@ When examining database schema with Supabase MCP:
 
 This context document should guide all development decisions and ensure consistency across the YouTube Analytics App codebase.
 
+## Workflow Editor System
+
+### Overview
+The workflow editor (`/dashboard/[channelId]/workflow-editor`) provides a visual interface for creating and managing AI-powered workflows that combine YouTube API calls, data transformations, and OpenAI completions.
+
+### Key Features
+- **Dynamic Input Fields**: Nodes can bind inputs to runtime variables using `$input.variable` or `$steps.stepId.outputKey` syntax
+- **System Prompt Integration**: OpenAI nodes can reference system prompts via `systemKey` and `promptKey` parameters
+- **YouTube API Discovery**: Extensive YouTube Data API v3 and Analytics API endpoints available as nodes
+- **Workflow Composition**: Sub-workflows can be executed via `workflow` step type using `WorkflowExecutor`
+- **Database Override**: Static workflows can be edited and saved to database, taking precedence over file versions
+
+### Architecture
+- **Static Workflows**: Defined in `src/utils/neria-workflows/workflows/` as TypeScript files
+- **Database Workflows**: Custom/edited workflows stored in Supabase with UUID IDs
+- **Workflow Engine**: `NeriaWorkflowEngine` loads database workflows first, falls back to static
+- **Node Types**: `youtube-api`, `openai`, `transform`, `parallel`, `workflow`, `condition`
+- **Executors**: Modular execution engines for each step type in `src/utils/neria-workflows/executors/`
+
+### UI Components
+- **NodePalette**: Sidebar with available nodes organized by category
+- **WorkflowCanvas**: Main editing area with drag-and-drop functionality  
+- **WorkflowNode**: Individual node rendering with dynamic input fields
+- **Dynamic Inputs**: Runtime variable binding with toggles for common patterns
+
+### Data Flow
+1. User selects workflow from dropdown (combines static + database workflows)
+2. Workflow definition loaded via API with proper precedence (database > static)
+3. Visual editor renders nodes with configurable inputs
+4. Changes saved to database, creating new UUID-based entries for static workflows
+5. Workflow engine uses database version for execution when available
+
 ## Feature: Collection system (/collection)
 
 ### Overview
@@ -196,13 +228,22 @@ This context document should guide all development decisions and ensure consiste
 - Timer pauses during loading, starts after animation completes
 
 ### API Endpoints
-- `/api/collection/preview`: Main data bundle (channel + analytics + winners + slide text)
+- `/api/collection/preview-workflow`: Primary endpoint using modular workflow system
+- `/api/collection/preview`: Legacy fallback endpoint
 - `/api/collection/losers`: Lazy load worst performer details for Slide 3
-- Both use YouTube Analytics API with 90-day window and viewsPerDay ranking
+- Collection page tries workflow API first, falls back to legacy if workflow fails
+
+### Workflow System Integration
+- Collection page now powered by modular workflow system instead of legacy monolithic code
+- Four modular workflows: `channel-overview`, `top-performer-analysis`, `underperformer-analysis`, `collection-composer`
+- `collection-composer` orchestrates the three analysis workflows in parallel
+- All workflows stored in `src/utils/neria-workflows/workflows/` as static files
+- Database workflows take precedence over static workflows when edited via workflow editor
 
 ### System Prompts Integration
 - All slide text generated server-side using `system_prompts` table
 - Prompts editable via dashboard system-prompts page
+- OpenAI nodes in workflows can reference system prompts via `systemKey` parameter
 - Fallback text available if prompt generation fails
 
 ### Key Components/State

@@ -105,8 +105,9 @@ const topPerformerAnalysis: Workflow = {
         maxTokens: 150
       },
       inputs: {
-        prompt: 'Analyze these top-performing video titles for winning themes: {{titles}}. What patterns make them successful?',
-        titles: '$steps.extract-titles.titlesList'
+        prompt: 'Analyze the top-performing video titles and channel context.',
+        winners_titles: '$steps.extract-titles.titlesList',
+        channel_title: '$input.channelTitle'
       },
       outputs: ['themeAnalysis'],
       dependencies: ['extract-titles']

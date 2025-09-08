@@ -50,11 +50,10 @@ export async function GET(request: Request) {
 
     if (execution.status === 'failed') {
       console.error('Workflow execution failed:', execution.errors);
-      
-      // Fallback to original API if workflow fails
-      return NextResponse.redirect(
-        new URL(`/api/collection/preview?channelId=${channelId}&refresh=${refresh}`, request.url)
-      );
+      return NextResponse.json({ 
+        error: 'Workflow execution failed', 
+        details: execution.errors 
+      }, { status: 500 });
     }
 
     // Debug: Log the execution results
