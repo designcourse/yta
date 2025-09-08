@@ -40,6 +40,107 @@ export const discoveredEndpoints: APIEndpoint[] = [
     example: { id: 'UC123', title: 'My Channel', subscriberCount: 1000 }
   },
   {
+    id: 'youtube-playlists',
+    name: 'List Playlists',
+    description: 'Retrieve playlists for a channel or by IDs',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/playlists',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'channelId', type: 'string', required: false, description: 'Channel ID to list playlists for' },
+      { name: 'playlistIds', type: 'array', required: false, description: 'Specific playlist IDs' },
+      { name: 'part', type: 'string', required: false, description: 'Data parts to include', default: 'snippet,contentDetails' },
+      { name: 'maxResults', type: 'number', required: false, description: 'Max results per page', default: 50 }
+    ],
+    outputs: [
+      { name: 'playlists', type: 'array', required: true, description: 'Playlist items' }
+    ]
+  },
+  {
+    id: 'youtube-playlist-items',
+    name: 'List Playlist Items',
+    description: 'Retrieve videos within a playlist',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/playlist-items',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'playlistId', type: 'string', required: true, description: 'Playlist ID' },
+      { name: 'part', type: 'string', required: false, description: 'Data parts to include', default: 'snippet,contentDetails' },
+      { name: 'maxResults', type: 'number', required: false, description: 'Max results per page', default: 50 }
+    ],
+    outputs: [
+      { name: 'playlistItems', type: 'array', required: true, description: 'Playlist items with video references' }
+    ]
+  },
+  {
+    id: 'youtube-subscriptions',
+    name: 'List Subscriptions',
+    description: 'Retrieve subscriptions for the authenticated user or a channel',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/subscriptions',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'channelId', type: 'string', required: false, description: 'Channel ID (for target channel subscriptions)' },
+      { name: 'mine', type: 'boolean', required: false, description: 'List current user subscriptions', default: true },
+      { name: 'part', type: 'string', required: false, description: 'Data parts to include', default: 'snippet,contentDetails' }
+    ],
+    outputs: [
+      { name: 'subscriptions', type: 'array', required: true, description: 'Subscription list' }
+    ]
+  },
+  {
+    id: 'youtube-comments',
+    name: 'List Comments',
+    description: 'Retrieve comments for a video',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/comments',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'videoId', type: 'string', required: true, description: 'Video ID to fetch comments for' },
+      { name: 'part', type: 'string', required: false, description: 'Data parts to include', default: 'snippet' },
+      { name: 'maxResults', type: 'number', required: false, description: 'Max results per page', default: 50 }
+    ],
+    outputs: [
+      { name: 'comments', type: 'array', required: true, description: 'Comments with author and text' }
+    ]
+  },
+  {
+    id: 'youtube-comment-threads',
+    name: 'List Comment Threads',
+    description: 'Retrieve comment threads for a video',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/comment-threads',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'videoId', type: 'string', required: true, description: 'Video ID to fetch threads for' },
+      { name: 'part', type: 'string', required: false, description: 'Data parts to include', default: 'snippet,replies' },
+      { name: 'maxResults', type: 'number', required: false, description: 'Max results per page', default: 50 }
+    ],
+    outputs: [
+      { name: 'commentThreads', type: 'array', required: true, description: 'Top-level comments with replies' }
+    ]
+  },
+  {
+    id: 'youtube-captions',
+    name: 'List Captions',
+    description: 'Retrieve caption tracks for a video',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/captions',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'videoId', type: 'string', required: true, description: 'Video ID' }
+    ],
+    outputs: [
+      { name: 'captions', type: 'array', required: true, description: 'Caption tracks metadata' }
+    ]
+  },
+  {
     id: 'youtube-analytics',
     name: 'Get Analytics Data',
     description: 'Fetch YouTube Analytics reports',
@@ -56,6 +157,40 @@ export const discoveredEndpoints: APIEndpoint[] = [
     outputs: [
       { name: 'analyticsRows', type: 'array', required: true, description: 'Analytics data rows' },
       { name: 'columnHeaders', type: 'array', required: true, description: 'Column definitions' }
+    ]
+  },
+  {
+    id: 'youtube-analytics-groups',
+    name: 'Analytics Groups',
+    description: 'Manage Analytics groups and items',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/analytics/groups',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'action', type: 'string', required: true, description: 'list|insert|update|delete' },
+      { name: 'groupId', type: 'string', required: false, description: 'Target group ID' },
+      { name: 'title', type: 'string', required: false, description: 'Group title (for insert/update)' }
+    ],
+    outputs: [
+      { name: 'groups', type: 'array', required: true, description: 'Analytics groups' }
+    ]
+  },
+  {
+    id: 'youtube-analytics-group-items',
+    name: 'Analytics Group Items',
+    description: 'Manage items within an Analytics group',
+    category: 'youtube',
+    method: 'GET',
+    path: '/api/youtube/analytics/group-items',
+    inputs: [
+      { name: 'accessToken', type: 'string', required: true, description: 'OAuth access token' },
+      { name: 'action', type: 'string', required: true, description: 'list|insert|delete' },
+      { name: 'groupId', type: 'string', required: true, description: 'Group ID' },
+      { name: 'resourceId', type: 'string', required: false, description: 'Resource to add/remove' }
+    ],
+    outputs: [
+      { name: 'groupItems', type: 'array', required: true, description: 'Items in the group' }
     ]
   },
   {

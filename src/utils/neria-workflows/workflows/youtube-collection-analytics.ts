@@ -19,12 +19,12 @@ const youtubeCollectionAnalytics: Workflow = {
       config: {
         endpoint: 'channels',
         params: {
-          part: 'snippet,statistics',
-          mine: true
+          part: 'snippet,statistics'
         }
       },
       inputs: {
-        accessToken: '$input.accessToken'
+        accessToken: '$input.accessToken',
+        channelId: '$input.channelId'
       },
       outputs: ['channelData'],
       dependencies: []
@@ -107,7 +107,7 @@ const youtubeCollectionAnalytics: Workflow = {
               maxTokens: 120
             },
             inputs: {
-              prompt: 'Generate greeting for {{channelData.title}} with {{channelData.subscriberCount}} subscribers',
+              prompt: 'Hey there, amazing community of {{channelData.title}}! With {{channelData.subscriberCount}} subscribers, you\'ve built an incredible family here.',
               channelData: '$steps.fetch-channel.channelData'
             },
             outputs: ['slide1Text'],
@@ -119,15 +119,15 @@ const youtubeCollectionAnalytics: Workflow = {
             name: 'Analyze Themes',
             config: {
               model: 'gpt-4o-mini',
-              system: 'You are Neria, a concise YouTube coach.',
-              maxTokens: 80
+              system: 'You are Neria, a concise YouTube coach. Analyze video title patterns and identify successful themes.',
+              maxTokens: 120
             },
             inputs: {
-              prompt: 'Analyze winning themes from: {{videoTitles}}',
-              videoTitles: '$steps.fetch-video-details.videoDetails.*.title'
+              prompt: 'Analyze winning themes from these top performing video titles: {{titles}}. Identify the common patterns that make them successful.',
+              titles: '$steps.build-initial.videoTitles'
             },
             outputs: ['slide2Text'],
-            dependencies: []
+            dependencies: ['build-initial']
           }
         ]
       },
@@ -136,9 +136,9 @@ const youtubeCollectionAnalytics: Workflow = {
       dependencies: ['fetch-channel', 'fetch-video-details']
     },
     {
-      id: 'build-response',
+      id: 'build-initial',
       type: 'transform',
-      name: 'Build Final Response',
+      name: 'Build Initial Data',
       config: {
         script: `
           // Calculate analytics baseline
@@ -149,12 +149,17 @@ const youtubeCollectionAnalytics: Workflow = {
             }
           };
 
+          // Extract video titles for theme analysis
+          const videoTitles = videoDetails.map(v => v.title).join(', ');
+
           // Process winners with analytics data
           const winners = videoDetails.map((video, index) => {
             const analyticsRow = analyticsRows.find(row => row[0] === video.id);
             const views = analyticsRow ? analyticsRow[1] : video.viewCount;
             const estimatedMinutesWatched = analyticsRow ? analyticsRow[2] : 0;
             const averageViewDuration = analyticsRow ? analyticsRow[3] : 0;
+            const averageViewPercentage = analyticsRow ? analyticsRow[4] : 0;
+            const subscribersGained = analyticsRow ? analyticsRow[5] : 0;
             
             return {
               id: video.id,
@@ -169,18 +174,49 @@ const youtubeCollectionAnalytics: Workflow = {
               views: views,
               estimatedMinutesWatched: estimatedMinutesWatched,
               averageViewDuration: averageViewDuration,
+              averageViewPercentage: averageViewPercentage,
+              subscribersGained: subscribersGained,
               viewsPerDay: views / 90
             };
           });
 
+          // Map channel data to expected format
+          const channel = {
+            id: channelData.id,
+            title: channelData.title,
+            description: channelData.description,
+            subs: channelData.subscriberCount,
+            views: channelData.viewCount,
+            videoCount: channelData.videoCount,
+            publishedAt: channelData.publishedAt
+          };
+
+          // Map winners to expected format with metrics object
+          const formattedWinners = winners.map(winner => ({
+            id: winner.id,
+            title: winner.title,
+            thumb: winner.thumbnails?.high?.url || winner.thumbnails?.medium?.url || winner.thumbnails?.default?.url || '',
+            publishedAt: winner.publishedAt,
+            duration: winner.duration,
+            metrics: {
+              views: winner.views,
+              watchTime: winner.estimatedMinutesWatched * 60, // convert to seconds
+              avgViewDur: winner.averageViewDuration,
+              avgViewPct: winner.averageViewPercentage || 0,
+              impressions: 0, // not available in this data
+              ctr: 0, // not available in this data  
+              subsGained: winner.subscribersGained || 0,
+              viewsPerDay: winner.viewsPerDay
+            }
+          })).sort((a, b) => b.metrics.viewsPerDay - a.metrics.viewsPerDay);
+
           return {
-            channel: channelData,
+            channel,
             analytics90d,
-            winners: winners.sort((a, b) => b.viewsPerDay - a.viewsPerDay),
+            winners: formattedWinners,
             loserIds: bottomIds,
-            slide1Text,
-            slide2Text,
-            slide3Text: ""
+            videoTitles,
+            slide1Text
           };
         `
       },
@@ -192,8 +228,36 @@ const youtubeCollectionAnalytics: Workflow = {
         slide1Text: '$steps.generate-insights.slide1Text',
         slide2Text: '$steps.generate-insights.slide2Text'
       },
-      outputs: ['finalResponse'],
+      outputs: ['channel', 'analytics90d', 'winners', 'loserIds', 'videoTitles', 'slide1Text'],
       dependencies: ['fetch-channel', 'fetch-video-details', 'fetch-analytics', 'process-winners', 'generate-insights']
+    },
+    {
+      id: 'build-final',
+      type: 'transform',
+      name: 'Build Final Response',
+      config: {
+        script: `
+          return {
+            channel,
+            analytics90d,
+            winners,
+            loserIds,
+            slide1Text,
+            slide2Text: slide2Text || "",
+            slide3Text: ""
+          };
+        `
+      },
+      inputs: {
+        channel: '$steps.build-initial.channel',
+        analytics90d: '$steps.build-initial.analytics90d',
+        winners: '$steps.build-initial.winners',
+        loserIds: '$steps.build-initial.loserIds',
+        slide1Text: '$steps.build-initial.slide1Text',
+        slide2Text: '$steps.generate-insights.slide2Text'
+      },
+      outputs: ['finalResponse'],
+      dependencies: ['build-initial', 'generate-insights']
     }
   ]
 };

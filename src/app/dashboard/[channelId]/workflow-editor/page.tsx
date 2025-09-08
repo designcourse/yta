@@ -52,6 +52,20 @@ export default function WorkflowEditorPage() {
     setSelectedNodeId(nodeId);
   }, []);
 
+  const setSelectedNodeInput = useCallback((key: string, value: any, options?: { asConfig?: boolean }) => {
+    setNodes(prev => prev.map(n => {
+      if (n.id !== selectedNodeId) return n;
+      if (options?.asConfig) {
+        return { ...n, config: { ...n.config, [key]: value } };
+      }
+      return { ...n, inputs: { ...n.inputs, [key]: value } };
+    }));
+  }, [selectedNodeId]);
+
+  const setSelectedNodeConfig = useCallback((key: string, value: any) => {
+    setNodes(prev => prev.map(n => n.id === selectedNodeId ? { ...n, config: { ...n.config, [key]: value } } : n));
+  }, [selectedNodeId]);
+
   const generateWorkflowCode = () => {
     const compiler = new WorkflowCompiler();
     return compiler.compile(nodes, workflowName, 'Workflow created with visual editor');
@@ -170,14 +184,17 @@ export default function WorkflowEditorPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Save failed');
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Save failed');
+      }
       const { workflow } = await res.json();
       setSelectedWorkflowId(workflow.id);
       await fetchWorkflows();
       alert('Workflow saved');
     } catch (error) {
       console.error('Error saving workflow:', error);
-      alert('Error saving workflow. Check the console for details.');
+      alert(`Error saving workflow: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSaving(false);
     }
@@ -337,19 +354,61 @@ export default function WorkflowEditorPage() {
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Inputs ({selectedNode.endpoint.inputs.length})
                       </label>
-                      <div className="space-y-2">
-                        {selectedNode.endpoint.inputs.map(input => (
-                          <div key={input.name} className="text-sm p-2 bg-blue-50 rounded">
-                            <div className="flex justify-between">
-                              <span className="font-medium">{input.name}</span>
-                              <span className="text-blue-600">{input.type}</span>
+                      <div className="space-y-3">
+                        {selectedNode.endpoint.inputs.map(input => {
+                          const isConfigForOpenAI = selectedNode.endpoint?.category === 'openai' && ['model','system','maxTokens'].includes(input.name);
+                          const currentValue = (isConfigForOpenAI ? (selectedNode.config as any)[input.name] : (selectedNode.inputs as any)[input.name]) ?? input.default ?? '';
+                          const isAutoBindable = input.name === 'channelId' || input.name === 'accessToken';
+                          return (
+                            <div key={input.name} className="text-sm p-2 bg-blue-50 rounded">
+                              <div className="flex justify-between items-center mb-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{input.name}</span>
+                                  {input.required && (<span className="text-red-500 text-xs">Required</span>)}
+                                </div>
+                                <span className="text-blue-600">{input.type}</span>
+                              </div>
+                              <p className="text-gray-600 text-xs mb-2">{input.description}</p>
+                              {isAutoBindable && (
+                                <div className="flex items-center gap-2 mb-2">
+                                  <button
+                                    onClick={() => setSelectedNodeInput(input.name, `$input.${input.name}`)}
+                                    className="px-2 py-0.5 text-xs border border-blue-200 rounded bg-white hover:bg-blue-50"
+                                    title={input.name === 'channelId' ? 'Bind to current dashboard channel' : 'Bind to current session access token'}
+                                  >
+                                    {input.name === 'channelId' ? 'Use current channel' : 'Use session token'}
+                                  </button>
+                                  {typeof currentValue === 'string' && currentValue.startsWith('$input.') && (
+                                    <span className="text-[11px] text-blue-700">Bound to {currentValue}</span>
+                                  )}
+                                </div>
+                              )}
+                              {input.type === 'number' ? (
+                                <input
+                                  type="number"
+                                  value={currentValue}
+                                  onChange={(e) => setSelectedNodeInput(input.name, Number(e.target.value), { asConfig: isConfigForOpenAI })}
+                                  className="w-full px-2 py-1 border border-blue-200 rounded text-sm bg-white"
+                                />
+                              ) : input.name === 'prompt' ? (
+                                <textarea
+                                  rows={4}
+                                  value={currentValue}
+                                  onChange={(e) => setSelectedNodeInput(input.name, e.target.value)}
+                                  placeholder="You can reference previous step outputs like: {{summary}} or {{steps.nodeId.response}}"
+                                  className="w-full px-2 py-1 border border-blue-200 rounded text-sm bg-white"
+                                />
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={currentValue}
+                                  onChange={(e) => setSelectedNodeInput(input.name, e.target.value, { asConfig: isConfigForOpenAI })}
+                                  className="w-full px-2 py-1 border border-blue-200 rounded text-sm bg-white"
+                                />
+                              )}
                             </div>
-                            <p className="text-gray-600 text-xs mt-1">{input.description}</p>
-                            {input.required && (
-                              <span className="text-red-500 text-xs">Required</span>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -380,6 +439,36 @@ export default function WorkflowEditorPage() {
                     x: {Math.round(selectedNode.position.x)}, y: {Math.round(selectedNode.position.y)}
                   </div>
                 </div>
+
+                {selectedNode.endpoint?.category === 'openai' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bind prompt/system to system_prompts</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="promptKey (e.g. collection_greeting)"
+                          value={(selectedNode.config as any)?.promptKey || ''}
+                          onChange={(e) => setSelectedNodeConfig('promptKey', e.target.value)}
+                          className="px-2 py-1 border rounded text-sm"
+                        />
+                        <input
+                          type="text"
+                          placeholder="systemKey (e.g. neria_chat_system)"
+                          value={(selectedNode.config as any)?.systemKey || ''}
+                          onChange={(e) => setSelectedNodeConfig('systemKey', e.target.value)}
+                          className="px-2 py-1 border rounded text-sm"
+                        />
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">If set, these override empty prompt/system by loading from system_prompts.</p>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      <p>
+                        Tip: Use <code>{"{{var}}"}</code> to insert values, or reference previous steps like <code>$steps.NODE_ID.outputKey</code>.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center text-gray-500 py-8">

@@ -40,9 +40,9 @@ export async function GET(request: Request) {
       }, { status: 400 });
     }
 
-    // Execute the YouTube collection analytics workflow
+    // Execute the collection composer workflow (modular approach)
     const engine = new NeriaWorkflowEngine();
-    const execution = await engine.executeWorkflow('youtube-collection-analytics', {
+    const execution = await engine.executeWorkflow('collection-composer', {
       accessToken: token.accessToken,
       channelId: channelId,
       userId: user.id,
@@ -65,18 +65,18 @@ export async function GET(request: Request) {
     });
 
     // Extract the final response from workflow results
-    const buildResponseResult = execution.stepResults['build-response'];
+    const composeFinalResult = execution.stepResults['compose-final-result'];
     
-    if (!buildResponseResult) {
-      console.error('No build-response step result found. Available results:', Object.keys(execution.stepResults));
-      throw new Error('Workflow completed but build-response step result not found');
+    if (!composeFinalResult) {
+      console.error('No compose-final-result step found. Available results:', Object.keys(execution.stepResults));
+      throw new Error('Workflow completed but compose-final-result step result not found');
     }
 
     // The result should be directly in the step result, not nested under finalResponse
-    const result = buildResponseResult;
+    const result = composeFinalResult;
     
     if (!result || typeof result !== 'object') {
-      console.error('Build response step result is invalid:', buildResponseResult);
+      console.error('Compose final step result is invalid:', composeFinalResult);
       throw new Error('Workflow completed but no valid final response found');
     }
 

@@ -10,14 +10,25 @@ export class OpenAIExecutor extends BaseExecutor {
     this.logStep(step.id, `Executing OpenAI call: ${step.name}`);
     
     const config = step.config as OpenAIConfig;
-    const { prompt, ...otherInputs } = inputs;
+    const { prompt: promptInput, ...otherInputs } = inputs;
 
-    if (!prompt) {
+    // Resolve prompt/system from system_prompts if keys are provided
+    let systemText = config.system;
+    let promptBase = promptInput as string | undefined;
+    try {
+      if (config.systemKey || config.promptKey) {
+        const { getPrompt } = await import('@/utils/prompts');
+        if (!systemText && config.systemKey) systemText = await getPrompt(config.systemKey);
+        if (!promptBase && config.promptKey) promptBase = await getPrompt(config.promptKey);
+      }
+    } catch {}
+
+    if (!promptBase) {
       throw new Error('Prompt is required for OpenAI calls');
     }
 
     // Process the prompt with template variables
-    const processedPrompt = this.processPromptTemplate(prompt, otherInputs);
+    const processedPrompt = this.processPromptTemplate(promptBase, otherInputs);
 
     // Use the existing OpenAI utility
     const { getClient } = await import('@/utils/openai');
@@ -26,7 +37,7 @@ export class OpenAIExecutor extends BaseExecutor {
     const response = await client.chat.completions.create({
       model: config.model || 'gpt-4o-mini',
       messages: [
-        ...(config.system ? [{ role: 'system', content: config.system }] : []),
+        ...(systemText ? [{ role: 'system', content: systemText }] : []),
         { role: 'user', content: processedPrompt }
       ],
       max_tokens: config.maxTokens || 150,
@@ -50,8 +61,8 @@ export class OpenAIExecutor extends BaseExecutor {
     let processed = prompt;
 
     // Replace {{variable}} patterns
-    processed = processed.replace(/\{\{([^}]+)\}\}/g, (match, varName) => {
-      const value = variables[varName];
+    processed = processed.replace(/\{\{\s*([^}\s]+)\s*\}\}/g, (match, varPath) => {
+      const value = this.getNestedValue(variables, String(varPath));
       if (value === undefined || value === null) {
         return match; // Keep original if variable not found
       }
@@ -70,5 +81,12 @@ export class OpenAIExecutor extends BaseExecutor {
     });
 
     return processed;
+  }
+
+  private getNestedValue(obj: any, path: string): any {
+    return path.split('.').reduce((acc: any, key: string) => {
+      if (acc === undefined || acc === null) return undefined;
+      return acc[key];
+    }, obj);
   }
 }

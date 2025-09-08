@@ -62,7 +62,19 @@ export interface DependencyGraph {
 
 // YouTube API specific types
 export interface YouTubeApiConfig {
-  endpoint: 'channels' | 'videos' | 'analytics-reports' | 'search';
+  endpoint: 
+    | 'channels'
+    | 'videos'
+    | 'playlists'
+    | 'playlist-items'
+    | 'subscriptions'
+    | 'comments'
+    | 'comment-threads'
+    | 'captions'
+    | 'search'
+    | 'analytics-reports'
+    | 'analytics-groups'
+    | 'analytics-group-items';
   params: Record<string, any>;
 }
 
@@ -70,6 +82,8 @@ export interface YouTubeApiConfig {
 export interface OpenAIConfig {
   model: string;
   system?: string;
+  systemKey?: string;
+  promptKey?: string;
   maxTokens?: number;
   temperature?: number;
 }

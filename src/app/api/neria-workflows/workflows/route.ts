@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { listWorkflows, saveWorkflow } from '@/utils/neria-workflows/storage';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
+import staticWorkflows from '@/utils/neria-workflows/workflows';
 
 export async function GET() {
   try {
@@ -8,8 +9,32 @@ export async function GET() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const workflows = await listWorkflows();
-    return NextResponse.json({ workflows });
+    // Get database-stored workflows
+    const dbWorkflows = await listWorkflows();
+    
+    // Convert static workflows to the same format
+    const staticWorkflowList = Object.values(staticWorkflows).map(workflow => ({
+      id: workflow.id,
+      key: workflow.id,
+      name: workflow.name,
+      description: workflow.description,
+      version: workflow.version,
+      definition: workflow,
+      visual: null, // Static workflows don't have visual data yet
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
+
+    // Combine both sources, with database workflows taking precedence
+    const allWorkflows = [...staticWorkflowList, ...dbWorkflows];
+    const uniqueWorkflows = allWorkflows.reduce((acc, workflow) => {
+      if (!acc.find(w => w.id === workflow.id)) {
+        acc.push(workflow);
+      }
+      return acc;
+    }, [] as typeof allWorkflows);
+
+    return NextResponse.json({ workflows: uniqueWorkflows });
   } catch (e: any) {
     console.error('[WorkflowsAPI][GET] Error', e);
     return NextResponse.json({ error: e.message }, { status: 500 });

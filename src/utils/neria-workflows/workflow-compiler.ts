@@ -289,7 +289,15 @@ export class WorkflowCompiler {
       'youtube-channels': 'channels',
       'youtube-analytics': 'analytics-reports',
       'youtube-videos': 'videos',
-      'youtube-search': 'search'
+      'youtube-search': 'search',
+      'youtube-playlists': 'playlists',
+      'youtube-playlist-items': 'playlist-items',
+      'youtube-subscriptions': 'subscriptions',
+      'youtube-comments': 'comments',
+      'youtube-comment-threads': 'comment-threads',
+      'youtube-captions': 'captions',
+      'youtube-analytics-groups': 'analytics-groups',
+      'youtube-analytics-group-items': 'analytics-group-items'
     };
     return mapping[endpointId] || endpointId;
   }
