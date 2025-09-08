@@ -35,13 +35,17 @@ const channelOverview: Workflow = {
       name: 'Generate Channel Greeting',
       config: {
         model: 'gpt-4o-mini',
-        system: 'You are Neria, a warm, supportive YouTube coach. Generate a personalized greeting that acknowledges the creator\'s community size and encourages them.',
+        // Use system_prompts template for strict two-sentence greeting
+        promptKey: 'collection_greeting',
+        system: 'You are Neria, a warm, supportive YouTube coach.',
         maxTokens: 120
       },
       inputs: {
-        prompt: 'Create a warm greeting for {{title}} who has {{subscriberCount}} subscribers. Acknowledge their community and express confidence in helping them grow.',
-        title: '$steps.fetch-channel.channelData.title',
-        subscriberCount: '$steps.fetch-channel.channelData.subscriberCount'
+        // Template variables expected by collection_greeting
+        given_name: '',
+        channel_title: '$steps.fetch-channel.channelData.title',
+        subscriber_count: '$steps.fetch-channel.channelData.subscriberCount',
+        video_count: '$steps.fetch-channel.channelData.videoCount'
       },
       outputs: ['greeting'],
       dependencies: ['fetch-channel']

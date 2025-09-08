@@ -234,6 +234,10 @@ export class WorkflowCompiler {
           config = {
             model: node.config.model || 'gpt-4o-mini',
             system: node.config.system,
+            // Pass through optional bindings to system_prompts so the executor
+            // can resolve DB-stored templates when prompt is blank
+            systemKey: node.config.systemKey,
+            promptKey: node.config.promptKey,
             maxTokens: node.config.maxTokens || 150,
             temperature: node.config.temperature || 0.7
           };

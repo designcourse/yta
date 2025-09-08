@@ -48,8 +48,29 @@ export async function saveWorkflow(payload: {
   visual?: { nodes: WorkflowNodeData[] };
 }): Promise<StoredWorkflow> {
   const supabase = await createSupabaseServerClient();
-  const upsertRow = {
-    id: payload.id,
+  // If an id is provided, perform an UPDATE by primary key to avoid insert
+  // conflicts on the primary key during upsert-by-key.
+  if (payload.id) {
+    const updateRow: any = {
+      // Do NOT change key on update; it is the natural identifier
+      name: payload.name,
+      description: payload.description,
+      version: payload.version || '1.0.0',
+      definition_json: payload.definition,
+      visual_json: payload.visual || null,
+    };
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update(updateRow)
+      .eq('id', payload.id)
+      .select('id,key,name,description,version,definition:definition_json,visual:visual_json,created_at,updated_at')
+      .single();
+    if (error) throw error;
+    return data as unknown as StoredWorkflow;
+  }
+
+  // No id provided → create or update by unique key
+  const upsertRow: any = {
     key: payload.key,
     name: payload.name,
     description: payload.description,

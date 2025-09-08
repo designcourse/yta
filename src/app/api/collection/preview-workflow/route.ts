@@ -99,14 +99,6 @@ export async function GET(request: Request) {
 
   } catch (error) {
     console.error("/api/collection/preview-workflow error", error);
-    
-    // Fallback to original API on any error
-    const url = new URL(request.url);
-    const channelId = url.searchParams.get("channelId");
-    const refresh = url.searchParams.get("refresh");
-    
-    return NextResponse.redirect(
-      new URL(`/api/collection/preview?channelId=${channelId}&refresh=${refresh}`, request.url)
-    );
+    return NextResponse.json({ error: "Workflow execution failed" }, { status: 500 });
   }
 }
