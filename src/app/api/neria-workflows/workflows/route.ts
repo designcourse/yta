@@ -25,14 +25,16 @@ export async function GET() {
       updated_at: new Date().toISOString()
     }));
 
-    // Combine both sources, with database workflows taking precedence
-    const allWorkflows = [...staticWorkflowList, ...dbWorkflows];
-    const uniqueWorkflows = allWorkflows.reduce((acc, workflow) => {
-      if (!acc.find(w => w.id === workflow.id)) {
-        acc.push(workflow);
-      }
-      return acc;
-    }, [] as typeof allWorkflows);
+    // Combine both sources, with database workflows taking precedence.
+    // Deduplicate by key (not id), because DB rows have UUID ids while static use the workflow key.
+    const combined = [...dbWorkflows, ...staticWorkflowList];
+    const seenByKey = new Set<string>();
+    const uniqueWorkflows = combined.filter(w => {
+      const key = (w as any).key || w.id;
+      if (seenByKey.has(key)) return false;
+      seenByKey.add(key);
+      return true;
+    });
 
     return NextResponse.json({ workflows: uniqueWorkflows });
   } catch (e: any) {

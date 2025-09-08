@@ -102,11 +102,13 @@ const underperformerAnalysis: Workflow = {
       name: 'Diagnose Performance Issues',
       config: {
         model: 'gpt-4o-mini',
-        system: 'You are Neria, a YouTube optimization expert. Analyze underperforming content to identify improvement opportunities.',
-        maxTokens: 120
+        // Use system prompt from system_prompts table to keep text consistent with collection slide 3
+        systemKey: 'collection_losers_theme',
+        maxTokens: 150
       },
       inputs: {
-        prompt: 'Analyze why this content underperformed: "{{title}}". What themes or approaches should be avoided or improved?',
+        // Minimal prompt; detailed instructions live in system prompt
+        prompt: 'Analyze why this content underperformed given the channel context.',
         title: '$steps.extract-underperformer-title.title'
       },
       outputs: ['diagnosis'],
