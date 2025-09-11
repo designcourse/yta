@@ -420,3 +420,26 @@ Environment
 - API: `GET/POST /api/scripts` stores a script per video plan; POST replaces any existing script (supports regeneration). Section resources are fetched via Perplexity (sonar-pro) to produce authoritative, working links.
 - Chat integration: on `/planner/video/[planId]`, the chat route uses GPT‑4o to classify prompts (script/guide/outline/flow, etc.), extracts optional duration/section counts, forwards cookies, calls `/api/scripts`, and emits SSE `script_generating`/`script_generated` (and `error`).
 - UI: `ScriptContainer` listens for those events and shows the shared blue-ring loader, then renders `ScriptView` (timestamp + title + description + vertical resource links) or `NoScriptLayout` when absent.
+
+### Billing & Subscription Management System (September 2025)
+- **Dashboard Navigation**: Updated sidebar to rename "Account Settings" to "My Account" and added new "Billing" link
+- **Per-Channel Subscriptions**: $29/month or $240/year billing model with individual subscriptions per YouTube channel
+- **Comprehensive Billing Dashboard** (`/billing`): Lists all active subscriptions with channel names, plan details, status, and renewal dates
+- **Stripe Customer Portal Integration**: "Update billing info" button opens Stripe's hosted portal for payment method management, invoice viewing, and billing information updates
+- **Cancellation Flow**: 
+  - Cancel button leads to dedicated page (`/billing/cancel/[subscriptionId]`) with reason textarea
+  - Records cancellation reason, customer tenure (days), and total revenue generated in `subscription_cancellations` table
+  - Implements industry-standard "cancel at period end" - subscription remains active until current billing period expires
+  - Clear UI messaging shows cancellation status and exact end date to users
+- **Database Schema**: 
+  - `subscription_cancellations` table with RLS policies for storing cancellation analytics
+  - Updated `wipe-all-data` API to include subscription cancellation records for complete data cleanup
+- **Stripe Integration**: 
+  - Webhook-driven subscription lifecycle management
+  - Payment confirmation flow with proper error handling
+  - Billing Portal configuration for customer self-service
+- **User Experience**: 
+  - Yellow warning notices for cancelled subscriptions with clear end dates
+  - Hide cancel button for already-cancelled subscriptions  
+  - Real-time subscription status checking via Stripe API
+  - Responsive design with proper loading states throughout billing flows
