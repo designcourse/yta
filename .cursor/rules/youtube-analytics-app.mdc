@@ -14,6 +14,7 @@ This is a YouTube analytics app for creators that provides AI-powered insights, 
 - **Styling**: Tailwind CSS 4.0 with responsive design patterns
 - **Database**: Supabase (PostgreSQL) with Row Level Security (RLS)
 - **Authentication**: Supabase Auth + Google OAuth (dual-phase authentication)
+- **Payment Processing**: Stripe (subscriptions, webhooks, Elements)
 - **APIs**: YouTube Data API v3, YouTube Analytics API
 - **AI**: OpenAI GPT-4o (primary), Perplexity (real-time web search only)
 - **3D Graphics**: Spline (@splinetool/react-spline)
@@ -35,6 +36,8 @@ Key tables and their relationships:
 - `channel_strategy`: per-user+channel persisted coaching plans
 - `video_plans`: stored video ideas with AI-generated summaries
 - `scripts`: LLM-generated video flows with sections and resources
+- `channel_subscriptions`: user_id, channel_id, stripe_customer_id, stripe_subscription_id, plan, status
+- `admins`: user_id (for development bypass functionality)
 
 ### Component Architecture
 - **Layout Components**: Use `DashboardLayout` for dashboard pages with sidebar navigation
@@ -112,6 +115,12 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=[google_client_id]
 GOOGLE_CLIENT_ID=[google_client_id]
 GOOGLE_CLIENT_SECRET=[google_client_secret]
 GEMINI_API_KEY=[gemini_api_key]
+STRIPE_SECRET_KEY=[stripe_secret_key]
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=[stripe_publishable_key]
+STRIPE_PRICE_MONTHLY=[stripe_price_id_monthly]
+STRIPE_PRICE_YEARLY=[stripe_price_id_yearly]
+STRIPE_WEBHOOK_SECRET=[stripe_webhook_secret]
+NEXT_PUBLIC_SITE_URL=[site_url]
 ```
 
 ## Common Issues & Solutions
@@ -195,10 +204,21 @@ This context document should guide all development decisions and ensure consiste
 - Lazy loads single worst video via `/api/collection/losers`
 - Timer pauses during loading, starts after animation completes
 
+#### Slide 4 (Billing Gate)
+- Checks subscription status via `/api/billing/status`
+- If active subscription exists: redirects to `/dashboard`
+- If no subscription: shows `BillingModal` with Stripe Elements integration
+- Modal includes Monthly/Yearly pricing, payment form, terms/privacy links
+- Admin users see "Grant free" bypass link for development
+
 ### API Endpoints
 - `/api/collection/preview`: Main data bundle (channel + analytics + winners + slide text)
 - `/api/collection/losers`: Lazy load worst performer details for Slide 3
-- Both use YouTube Analytics API with 90-day window and viewsPerDay ranking
+- `/api/billing/status`: Check subscription status and admin flag for channel
+- `/api/billing/create-subscription`: Create Stripe subscription with payment confirmation
+- `/api/billing/webhook`: Handle Stripe webhook events (subscription lifecycle)
+- `/api/billing/grant-free`: Admin endpoint to bypass billing for development
+- Both collection APIs use YouTube Analytics API with 90-day window and viewsPerDay ranking
 
 ### System Prompts Integration
 - All slide text generated server-side using `system_prompts` table
@@ -208,7 +228,50 @@ This context document should guide all development decisions and ensure consiste
 ### Key Components/State
 - Uses `NeriaResponse` for animated text with batching and punctuation-aware delays
 - Local state: `activeSlide`, `slide1Done`, `slide2Done`, `slide3Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`
-- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=5`
+- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=4`
+
+## Feature: Billing Integration (Stripe)
+
+### Overview
+- Per-channel subscription model: $29/month or $240/year ($20/month equivalent)
+- Integrated into `/collection` page as a paywall on slide 4
+- Uses Stripe Elements for secure payment collection
+- Webhook-driven subscription lifecycle management
+
+### Architecture
+- **Payment Flow**: Stripe Elements → Payment Method → Subscription Creation → Payment Confirmation
+- **Database**: `channel_subscriptions` table with RLS policies per user/channel
+- **Admin Bypass**: `admins` table allows development access via "Grant free" link
+- **Security**: Server-side payment confirmation prevents client-side tampering
+
+### Components
+- `BillingModal`: Two-column modal with payment form and features list
+- Monthly/Yearly toggle with pricing display
+- Stripe Elements integration: CardNumber, CardExpiry, CardCvc
+- Terms and privacy policy links with checkbox validation
+
+### API Routes
+- `GET /api/billing/status`: Returns `{ hasActive, isAdmin }` for subscription check
+- `POST /api/billing/create-subscription`: Creates subscription and confirms payment
+- `POST /api/billing/webhook`: Handles Stripe events (checkout.session.completed, customer.subscription.*)
+- `POST /api/billing/grant-free`: Admin-only endpoint to bypass billing
+
+### Stripe Configuration
+- Products and Prices must be created in Stripe Dashboard
+- Webhook endpoint configured for subscription lifecycle events
+- Test mode uses standard Stripe test card numbers (4242 4242 4242 4242)
+
+### Payment Confirmation Flow
+1. Client creates payment method via Stripe Elements
+2. Server creates subscription with `payment_behavior: 'default_incomplete'`
+3. Server confirms payment intent if status is `requires_confirmation`
+4. Database updated with subscription status
+5. Client redirected to dashboard on success
+
+### Legal Pages
+- `/terms`: Terms of service page (placeholder content)
+- `/privacy`: Privacy policy page (placeholder content)
+- Both linked from billing modal checkbox
 
 ### User Notes
 - Do not ever run the following commands: npm run dev, npm i, etc.. Instead, tell the user to run these commands himself.
