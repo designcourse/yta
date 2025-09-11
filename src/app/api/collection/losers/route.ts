@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getValidAccessToken } from "@/utils/googleAuth";
+import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 
 export async function POST(request: Request) {
   try {
@@ -10,9 +11,29 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({}));
     const ids: string[] = Array.isArray(body?.ids) ? body.ids : [];
+    const channelId: string | undefined = body?.channelId;
     if (ids.length === 0) return NextResponse.json({ items: [] });
 
-    const token = await getValidAccessToken(user.id);
+    // Try cache first
+    try {
+      if (channelId) {
+        const admin = createSupabaseAdminClient();
+        const { data: cached } = await admin
+          .from('collection_cache')
+          .select('losers_json')
+          .eq('user_id', user.id)
+          .eq('channel_id', channelId)
+          .single();
+        const losers = (cached?.losers_json as any[]) || [];
+        const byId = new Map(losers.map(l => [l.id, l] as const));
+        const items = ids.map(id => byId.get(id)).filter(Boolean);
+        if (items.length > 0) {
+          return NextResponse.json({ items });
+        }
+      }
+    } catch {}
+
+    const token = await getValidAccessToken(user.id, channelId);
     if (!token.success) return NextResponse.json({ error: token.error || "No YouTube access" }, { status: 400 });
 
     const videosRes = await fetch(

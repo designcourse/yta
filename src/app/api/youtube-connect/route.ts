@@ -197,6 +197,36 @@ export async function POST(request: Request) {
       }
     }
 
+    // Set last_channel_used on google_accounts for convenience
+    try {
+      if (channels.length > 0) {
+        const primaryChannelId = channels[0]?.id as string | undefined;
+        if (primaryChannelId) {
+          await admin
+            .from('google_accounts')
+            .update({ last_channel_used: primaryChannelId })
+            .eq('user_id', originalUserId)
+            .eq('google_sub', googleSubId as any);
+        }
+      }
+    } catch {}
+
+    // Queue initial analyze by inserting/refreshing cache placeholder
+    try {
+      if (channels.length > 0) {
+        const primaryChannelId = channels[0]?.id as string | undefined;
+        if (primaryChannelId) {
+          await admin.from('collection_cache').upsert({
+            user_id: originalUserId,
+            channel_id: primaryChannelId,
+            payload_json: null,
+            winners_json: null,
+            losers_json: null,
+          }, { onConflict: 'user_id,channel_id' });
+        }
+      }
+    } catch {}
+
     // Return the channel IDs that were added
     const channelIds = channels.map(channel => channel.id);
     return NextResponse.json({

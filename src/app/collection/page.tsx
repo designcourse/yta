@@ -4,18 +4,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import NeriaResponse from '@/components/NeriaResponse';
 
+type Slide = { id: 1 | 2 | 3; headline: string; body: string; keyStats: Array<{ label: string; value: string; note?: string }>; actions: string[]; confidence: number };
+
 type PreviewPayload = {
-  channel: { id: string; title: string; description: string; subs: number; views: number; videoCount: number; publishedAt: string };
-  analytics90d: { baseline: { ctrMedian: number; avgPctMedian: number } };
-  winners: Array<{ id: string; title: string; thumb: string; publishedAt: string; duration: string; metrics: { views: number; watchTime: number; avgViewDur: number; avgViewPct: number; impressions: number; ctr: number; subsGained: number; viewsPerDay: number } }>;
-  loserIds: string[];
-  primaryLoserId?: string;
-  slide1Text?: string;
-  slide2Text?: string;
-  slide3Text?: string;
+  channelMeta: { id: string; title: string; subs: number; views: number; videoCount: number; publishedAt: string };
+  winners: Array<{ videoId: string; title: string; thumb: string; publishedAt?: string; duration?: string; viewsPerDay90?: number }>;
+  losers: Array<{ videoId: string; title: string; thumb: string; publishedAt?: string; duration?: string; viewsPerDay90?: number }>;
+  slides: Slide[];
 };
 
-const SLIDE_COUNT = 5;
+const SLIDE_COUNT = 3;
 const DEFAULT_SLIDE_DURATION_MS = 9000;
 const SLIDE1_BUFFER_MS = 5000;
 
@@ -95,20 +93,9 @@ export default function CollectionPage() {
     }
   };
 
-  const buildSlide2Insight = (payload: PreviewPayload) => {
-    const winners = Array.isArray(payload.winners) ? payload.winners : [];
-    if (winners.length === 0) {
-      return `Not enough recent data to surface top performers yet. I'll watch new uploads and highlight wins next.`;
-    }
-    const topByViews = winners.reduce((best, cur) => (cur.metrics.views > best.metrics.views ? cur : best), winners[0]);
-    const views = formatCompactCount(topByViews.metrics.views);
-    const vpd = Math.round(topByViews.metrics.viewsPerDay);
-    const avgPct = Math.round(topByViews.metrics.avgViewPct);
-    const avgDurSec = Math.round(topByViews.metrics.avgViewDur);
-    const avgMin = Math.floor(avgDurSec / 60);
-    const avgSec = Math.round(avgDurSec % 60);
-    const avgDurStr = `${avgMin}m ${avgSec}s`;
-    return `Your strongest performer in the last 90 days is “${topByViews.title}” — ${views} views (~${vpd}/day), average view duration ${avgDurStr}, and average view percentage ${avgPct}%. Let’s double down on what made this work while we review patterns across the rest of your winners.`;
+  const buildSlideText = (s?: Slide) => {
+    if (!s) return '';
+    return s.body.trim();
   };
 
   useEffect(() => {
@@ -223,7 +210,7 @@ export default function CollectionPage() {
 
   // Lazy load for Slide 3 losers
   const [losersLoading, setLosersLoading] = useState(false);
-  const [loserCard, setLoserCard] = useState<{ id: string; title: string; thumb: string; publishedAt: string; duration: string } | null>(null);
+  const [loserCard, setLoserCard] = useState<{ id: string; title: string; thumb: string; publishedAt?: string; duration?: string } | null>(null);
 
   useEffect(() => {
     const go = async () => {
@@ -231,15 +218,20 @@ export default function CollectionPage() {
       setLosersLoading(true);
       setLoadingPause(true);
       try {
-        const res = await fetch('/api/collection/losers', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: data.primaryLoserId ? [data.primaryLoserId] : data.loserIds.slice(0,1), channelId }),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const items = Array.isArray(json?.items) ? json.items : [];
-          setLoserCard(items[0] || null);
+        if (data.losers && data.losers.length > 0) {
+          const l = data.losers[0];
+          setLoserCard({ id: l.videoId, title: l.title, thumb: l.thumb, publishedAt: l.publishedAt, duration: l.duration });
+        } else {
+          const res = await fetch('/api/collection/losers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: [], channelId }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const items = Array.isArray(json?.items) ? json.items : [];
+            setLoserCard(items[0] || null);
+          }
         }
       } catch {}
       finally {
@@ -290,7 +282,7 @@ export default function CollectionPage() {
               <div className="content-stretch flex items-center justify-center w-full">
                 <div className="w-full">
                   <NeriaResponse
-                    response={data.slide1Text || `I was able to gather some valuable insights into your channel, ${data.channel.title}. I’m confident we can work together to help your channel grow.`}
+                    response={buildSlideText(data.slides?.[0]) || `Welcome to your channel snapshot, ${data.channelMeta.title}.`}
                     isVisible={true}
                     onComplete={() => setSlide1Done(true)}
                   />
@@ -304,7 +296,8 @@ export default function CollectionPage() {
                 <div className="flex-1 min-w-[250px] max-w-[250px]">
                   {data.winners && data.winners.length > 0 ? (
                     (() => {
-                      const top = data.winners.reduce((best, cur) => (cur.metrics.views > best.metrics.views ? cur : best), data.winners[0]);
+                      const withVpd = data.winners.map(w => ({ ...w, vpd: w.viewsPerDay90 || 0 }));
+                      const top = withVpd.reduce((best, cur) => (cur.vpd > (best as any).vpd ? cur : best), withVpd[0]);
                       return (
                         <div className="w-full border border-black rounded-[12px] overflow-hidden bg-white shadow-[4px_4px_0_0_#000]">
                           <div className="aspect-video w-full bg-[#f4f4f4] overflow-hidden">
@@ -318,13 +311,11 @@ export default function CollectionPage() {
                           <div className="p-5 flex flex-col gap-3">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-semibold px-2 py-1 border border-black rounded-full">Top performer</span>
-                              <span className="text-xs text-black/70">{formatDate(top.publishedAt)} • {parseISODurationToHMS(top.duration)}</span>
+                              <span className="text-xs text-black/70">{top.publishedAt ? formatDate(String(top.publishedAt)) : ''}{top.duration ? ` • ${parseISODurationToHMS(String(top.duration))}` : ''}</span>
                             </div>
                             <div className="text-[20px] leading-snug font-semibold text-black">{top.title}</div>
                             <div className="flex gap-6 text-sm text-black/80">
-                              <div><span className="font-semibold">Views:</span> {formatCompactCount(top.metrics.views)}</div>
-                              <div><span className="font-semibold">Avg %:</span> {Math.round(top.metrics.avgViewPct)}%</div>
-                              <div><span className="font-semibold">VPD:</span> {Math.round(top.metrics.viewsPerDay)}</div>
+                              <div><span className="font-semibold">VPD:</span> {Math.round(top.viewsPerDay90 || 0)}</div>
                             </div>
                           </div>
                         </div>
@@ -338,7 +329,7 @@ export default function CollectionPage() {
                 {/* Right: Neria insight with same animation/styling */}
                 <div className="flex-1 min-w-[320px]">
                   <NeriaResponse
-                    response={data.slide2Text && data.slide2Text.length > 0 ? data.slide2Text : buildSlide2Insight(data)}
+                    response={buildSlideText(data.slides?.[1])}
                     isVisible={true}
                     onComplete={() => setSlide2Done(true)}
                   />
@@ -365,7 +356,7 @@ export default function CollectionPage() {
                       <div className="p-5 flex flex-col gap-3">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold px-2 py-1 border border-black rounded-full">Under-performer</span>
-                          <span className="text-xs text-black/70">{formatDate(loserCard.publishedAt)} • {parseISODurationToHMS(loserCard.duration)}</span>
+                          <span className="text-xs text-black/70">{loserCard.publishedAt ? formatDate(String(loserCard.publishedAt)) : ''}{loserCard.duration ? ` • ${parseISODurationToHMS(String(loserCard.duration))}` : ''}</span>
                         </div>
                         <div className="text-[20px] leading-snug font-semibold text-black line-clamp-2">{loserCard.title}</div>
                       </div>
@@ -378,7 +369,7 @@ export default function CollectionPage() {
                 {/* Right: Neria diagnosis */}
                 <div className="flex-1 min-w-[320px]">
                   <NeriaResponse
-                    response={losersLoading ? 'Analyzing the weakest theme from the last 90 days…' : (data.slide3Text && data.slide3Text.length > 0 ? data.slide3Text : 'This type of content is dragging down performance relative to your baseline. We should avoid or radically reframe this theme going forward.')}
+                    response={losersLoading ? 'Analyzing the weakest theme from the last 90 days…' : buildSlideText(data.slides?.[2])}
                     isVisible={true}
                     onComplete={() => setSlide3Done(true)}
                   />
@@ -397,10 +388,10 @@ export default function CollectionPage() {
               <div className="flex flex-col gap-3 items-start">
                 <div className={`flex items-center gap-3 transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
                   <img src={YT_ICON} alt="YouTube" className="w-8 h-6" />
-                  <div className="font-bold text-[38px] text-black">{data.channel.title?.toUpperCase?.() || data.channel.title}</div>
+                  <div className="font-bold text-[38px] text-black">{data.channelMeta.title?.toUpperCase?.() || data.channelMeta.title}</div>
                 </div>
               </div>
-              <div className={`w-5/6 text-[19px] text-black max-w-[900px] mb-[70px] transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '100ms' }}>{firstSentence(data.channel.description)}</div>
+              <div className={`w-5/6 text-[19px] text-black max-w-[900px] mb-[70px] transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '100ms' }}>{''}</div>
               </div>
               <div className="flex gap-[67px] items-start">
                 <div className="flex flex-col gap-4 items-start">
@@ -408,21 +399,21 @@ export default function CollectionPage() {
                   <img src={SUBS_ICON} alt="Subscribers" className="h-[28px] w-[26px] object-contain" />
                   <div className="font-bold text-[19px] text-black">SUBSCRIBERS</div>
                 </div>
-                <div className={`font-semibold text-[50px] text-black w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '260ms' }}>{formatCompactCount(data.channel.subs)}</div>
+                <div className={`font-semibold text-[50px] text-black w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '260ms' }}>{formatCompactCount(data.channelMeta.subs)}</div>
                 </div>
                 <div className="flex flex-col gap-4 items-start">
                 <div className={`flex flex-col gap-3 items-start w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '180ms' }}>
                   <img src={VIEWS_ICON} alt="Views" className="h-[26px] w-[26px] object-contain" />
                   <div className="font-bold text-[19px] text-black">VIEWS</div>
                 </div>
-                <div className={`font-semibold text-[50px] text-black w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '290ms' }}>{formatCompactCount(data.channel.views)}</div>
+                <div className={`font-semibold text-[50px] text-black w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '290ms' }}>{formatCompactCount(data.channelMeta.views)}</div>
                 </div>
                 <div className="flex flex-col gap-4 items-start">
                 <div className={`flex flex-col gap-3 items-start w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '210ms' }}>
                   <img src={VIDEOS_ICON} alt="Videos" className="h-[26px] w-[26px] object-contain" />
                   <div className="font-bold text-[19px] text-black">VIDEOS</div>
                 </div>
-                <div className={`font-semibold text-[50px] text-black w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '320ms' }}>{formatCompactCount(data.channel.videoCount)}</div>
+                <div className={`font-semibold text-[50px] text-black w-full transition-all duration-500 ease-out ${metaAnim ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`} style={{ transitionDelay: '320ms' }}>{formatCompactCount(data.channelMeta.videoCount)}</div>
                 </div>
               </div>
             </div>

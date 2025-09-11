@@ -13,11 +13,17 @@
     "@aws-sdk/s3-request-presigner": "^3.879.0",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.56.0",
+    "@temporalio/activity": "^1.13.0",
+    "@temporalio/client": "^1.13.0",
+    "@temporalio/common": "^1.13.0",
+    "@temporalio/worker": "^1.13.0",
+    "@temporalio/workflow": "^1.13.0",
     "next": "15.5.0",
     "openai": "^5.15.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "tiktoken": "^1.0.22"
+    "tiktoken": "^1.0.22",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

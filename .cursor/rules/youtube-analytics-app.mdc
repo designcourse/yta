@@ -209,3 +209,6 @@ This context document should guide all development decisions and ensure consiste
 - Uses `NeriaResponse` for animated text with batching and punctuation-aware delays
 - Local state: `activeSlide`, `slide1Done`, `slide2Done`, `slide3Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`
 - Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=5`
+
+### User Notes
+- Do not ever run the following commands: npm run dev, npm i, etc.. Instead, tell the user to run these commands himself.
