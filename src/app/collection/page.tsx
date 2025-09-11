@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import NeriaResponse from '@/components/NeriaResponse';
+import dynamic from 'next/dynamic';
+
+const BillingModal = dynamic(() => import('@/components/BillingModal'), { ssr: false });
 
 type Slide = { id: 1 | 2 | 3; headline: string; body: string; keyStats: Array<{ label: string; value: string; note?: string }>; actions: string[]; confidence: number };
 
@@ -13,7 +16,7 @@ type PreviewPayload = {
   slides: Slide[];
 };
 
-const SLIDE_COUNT = 3;
+const SLIDE_COUNT = 4;
 const DEFAULT_SLIDE_DURATION_MS = 9000;
 const SLIDE1_BUFFER_MS = 5000;
 
@@ -40,6 +43,10 @@ export default function CollectionPage() {
   const [metaAnim, setMetaAnim] = useState(false);
   const progressRef = useRef<HTMLDivElement | null>(null);
   const prefersReduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
+
+  // Billing gating
+  const [showBilling, setShowBilling] = useState(false);
+  const [hasActiveSub, setHasActiveSub] = useState<boolean | null>(null);
 
   // Utilities
   const firstSentence = (text: string) => {
@@ -119,6 +126,26 @@ export default function CollectionPage() {
     fetchPreview();
   }, [channelId, router]);
 
+  // Check subscription status when approaching slide 4
+  useEffect(() => {
+    const go = async () => {
+      if (!channelId) return;
+      if (activeSlide !== 3) return;
+      try {
+        const res = await fetch(`/api/billing/status?channelId=${encodeURIComponent(channelId)}`);
+        const json = await res.json();
+        if (json?.hasActive) {
+          router.push(`/dashboard?channelId=${encodeURIComponent(channelId)}`);
+        } else {
+          setHasActiveSub(false);
+          setShowBilling(true);
+          setPauseTimer(true);
+        }
+      } catch {}
+    };
+    go();
+  }, [activeSlide, channelId, router]);
+
   // Pause timer utility (reserved for future lazy slides)
   const setLoadingPause = (isPaused: boolean) => {
     setPauseTimer(isPaused);
@@ -190,6 +217,13 @@ export default function CollectionPage() {
         if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
         return;
       }
+      start = performance.now();
+      duration = DEFAULT_SLIDE_DURATION_MS;
+      raf = requestAnimationFrame(animate);
+      return () => { if (raf) cancelAnimationFrame(raf); };
+    } else if (activeSlide === 3) {
+      // slide 4: billing gate, timer stops if modal shown
+      if (showBilling) return;
       start = performance.now();
       duration = DEFAULT_SLIDE_DURATION_MS;
       raf = requestAnimationFrame(animate);
@@ -376,6 +410,12 @@ export default function CollectionPage() {
                 </div>
               </div>
             )}
+
+            {activeSlide === 3 && (
+              <div className="w-full flex items-center justify-center text-black">
+                <div className="text-xl">Unlock full analytics for this channel.</div>
+              </div>
+            )}
           </div>
 
           {/* Bottom: channel stats with internal progress bar */}
@@ -419,6 +459,8 @@ export default function CollectionPage() {
             </div>
             </div>
           </div>
+          {/* Billing Modal */}
+          <BillingModal open={showBilling} onClose={() => { setShowBilling(false); setPauseTimer(false); }} channelId={channelId!} />
         </div>
       )}
     </div>

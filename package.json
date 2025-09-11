@@ -11,6 +11,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.879.0",
     "@aws-sdk/s3-request-presigner": "^3.879.0",
+    "@stripe/react-stripe-js": "^4.0.2",
+    "@stripe/stripe-js": "^7.9.0",
     "@supabase/ssr": "^0.7.0",
     "@supabase/supabase-js": "^2.56.0",
     "@temporalio/activity": "^1.13.0",
@@ -22,6 +24,7 @@
     "openai": "^5.15.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "stripe": "^18.5.0",
     "tiktoken": "^1.0.22",
     "zod": "^3.23.8"
   },

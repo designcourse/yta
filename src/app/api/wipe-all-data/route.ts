@@ -73,6 +73,14 @@ export async function POST(request: Request) {
         .in("channel_id", channelIds);
       if (collectionChunksError) console.warn("⚠️ Error deleting collection_chunks:", collectionChunksError);
 
+      // Delete channel_subscriptions scoped by channels and user
+      const { error: subsByChannelError } = await admin
+        .from("channel_subscriptions")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (subsByChannelError) console.warn("⚠️ Error deleting channel_subscriptions (by channel):", subsByChannelError);
+
       // Delete memory_longterm
       const { error: memoryLongtermError } = await admin
         .from("memory_longterm")
@@ -122,6 +130,13 @@ export async function POST(request: Request) {
       .delete()
       .eq("user_id", user.id);
     if (threadsError) console.warn("⚠️ Error deleting chat_threads:", threadsError);
+
+    // Delete channel_subscriptions by user_id (catch any remaining)
+    const { error: subsByUserError } = await admin
+      .from("channel_subscriptions")
+      .delete()
+      .eq("user_id", user.id);
+    if (subsByUserError) console.warn("⚠️ Error deleting channel_subscriptions (by user):", subsByUserError);
 
     // Delete all channels for the user
     const { error: channelsError } = await admin
