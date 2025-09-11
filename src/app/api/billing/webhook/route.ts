@@ -48,6 +48,7 @@ export async function POST(request: Request) {
         const customerId = sub.customer as string | undefined;
         const status = sub.status as string;
         const currentPeriodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
+        console.log('Subscription updated/deleted webhook:', { id: sub.id, status, current_period_end: currentPeriodEnd, cancel_at_period_end: sub.cancel_at_period_end, raw_period_end: sub.current_period_end });
         if (customerId) {
           await admin.from('channel_subscriptions').update({
             status,
@@ -55,6 +56,17 @@ export async function POST(request: Request) {
             updated_at: new Date().toISOString(),
           }).eq('stripe_subscription_id', sub.id);
         }
+        break;
+      }
+      case 'customer.subscription.created': {
+        const sub = event.data.object as any;
+        const currentPeriodEnd = sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
+        console.log('Subscription created webhook:', { id: sub.id, status: sub.status, current_period_end: currentPeriodEnd });
+        await admin.from('channel_subscriptions').update({
+          status: sub.status,
+          current_period_end: currentPeriodEnd,
+          updated_at: new Date().toISOString(),
+        }).eq('stripe_subscription_id', sub.id);
         break;
       }
       default:

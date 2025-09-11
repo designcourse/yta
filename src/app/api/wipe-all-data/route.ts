@@ -81,6 +81,14 @@ export async function POST(request: Request) {
         .eq("user_id", user.id);
       if (subsByChannelError) console.warn("⚠️ Error deleting channel_subscriptions (by channel):", subsByChannelError);
 
+      // Delete subscription_cancellations
+      const { error: cancellationsByChannelError } = await admin
+        .from("subscription_cancellations")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (cancellationsByChannelError) console.warn("⚠️ Error deleting subscription_cancellations (by channel):", cancellationsByChannelError);
+
       // Delete memory_longterm
       const { error: memoryLongtermError } = await admin
         .from("memory_longterm")
@@ -137,6 +145,13 @@ export async function POST(request: Request) {
       .delete()
       .eq("user_id", user.id);
     if (subsByUserError) console.warn("⚠️ Error deleting channel_subscriptions (by user):", subsByUserError);
+
+    // Delete subscription_cancellations by user_id
+    const { error: cancellationsByUserError } = await admin
+      .from("subscription_cancellations")
+      .delete()
+      .eq("user_id", user.id);
+    if (cancellationsByUserError) console.warn("⚠️ Error deleting subscription_cancellations (by user):", cancellationsByUserError);
 
     // Delete all channels for the user
     const { error: channelsError } = await admin

@@ -15,6 +15,7 @@ export default function ConditionalLayout({ children }: ConditionalLayoutProps) 
   const isDashboardPage = (pathname.startsWith("/dashboard") && 
                            !pathname.startsWith("/dashboard/collection")) || 
                           pathname.startsWith("/account") || 
+                          pathname.startsWith("/billing") ||
                           pathname.startsWith("/support");
 
   const isCollectionPage = pathname.startsWith('/collection');

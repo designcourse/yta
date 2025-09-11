@@ -221,7 +221,13 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
             href="/account"
             className="block text-base text-gray-600 hover:text-gray-900"
           >
-            Account Settings
+            My Account
+          </Link>
+          <Link
+            href="/billing"
+            className="block text-base text-gray-600 hover:text-gray-900"
+          >
+            Billing
           </Link>
           <Link
             href="/support"
