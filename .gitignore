@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+tests/.auth/
+.playwright-profile/
 
 # next.js
 /.next/

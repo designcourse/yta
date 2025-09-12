@@ -275,3 +275,24 @@ This context document should guide all development decisions and ensure consiste
 
 ### User Notes
 - Do not ever run the following commands: npm run dev, npm i, etc.. Instead, tell the user to run these commands himself.
+
+## Playwright E2E Testing
+
+- **MCP Integration**: Playwright MCP server is enabled in global MCP config so the assistant can drive a real browser when needed.
+- **Manual Login Gate**: Tests are designed for manual Google login first, then automated flows proceed. A fresh Chrome profile can be forced to always prompt login.
+- **Primary dashboard test**: `tests/e2e/dashboard/neria-chat.spec.ts` sends a short Neria message and asserts a non-empty assistant response.
+- **Windows-friendly scripts** (package.json):
+  - `"test all"`: runs all Playwright tests
+  - `"test:login"`: runs only the dashboard Neria chat test
+  - `"dashboard"`: forces fresh Chrome profile, prompts manual login each run, then executes the dashboard test
+
+Run commands:
+```
+npm run "test all"
+npm run test:login
+npm run dashboard
+```
+
+Notes:
+- The fresh-login script uses `set PLAYWRIGHT_FRESH_PROFILE=1 && ...` for Windows.
+- A persistent profile is used behind the scenes to reduce Google anti-automation friction; the fresh profile flag bypasses existing cookies.

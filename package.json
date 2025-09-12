@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test all": "playwright test",
+    "test:login": "playwright test tests/e2e/dashboard/neria-chat.spec.ts",
+    "dashboard": "set PLAYWRIGHT_FRESH_PROFILE=1 && playwright test tests/e2e/dashboard/neria-chat.spec.ts --global-timeout=0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.879.0",
@@ -30,12 +33,15 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.55.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^7.0.3",
     "eslint": "^9",
     "eslint-config-next": "15.5.0",
+    "playwright": "^1.55.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

@@ -759,8 +759,8 @@ const NeriaContainer: React.FC = () => {
                       >
                         {m.content}
                       </div>
-                                         ) : (
-                       <div className="text-white space-y-4 max-w-[85%]">
+                     ) : (
+                       <div className="text-white space-y-4 max-w-[85%]" data-testid="neria-response">
                         <div className="text-base leading-relaxed opacity-90 whitespace-pre-wrap">{parseMarkdownLinks(m.content)}</div>
                        </div>
                     )}
