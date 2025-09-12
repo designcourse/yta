@@ -16,6 +16,21 @@ async function checkUserHasChannels(userId: string): Promise<boolean> {
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const errorParam = searchParams.get("error");
+  const errorCode = searchParams.get("error_code");
+  const errorDescription = searchParams.get("error_description");
+  
+  // Log any errors from Supabase
+  if (errorParam) {
+    console.error("Auth callback error:", {
+      errorParam,
+      errorCode,
+      errorDescription
+    });
+    // Redirect to home with error in URL
+    return NextResponse.redirect(`${origin}/?error=${errorParam}&error_code=${errorCode || ''}&error_description=${encodeURIComponent(errorDescription || '')}`);
+  }
+  
   let next = searchParams.get("next") ?? "/dashboard";
   if (!next.startsWith("/")) next = "/dashboard";
 

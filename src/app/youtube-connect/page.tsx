@@ -23,8 +23,8 @@ export default function YouTubeConnectPage() {
   useEffect(() => {
     if (!currentUserId) return;
 
-    // Using your Google Client ID from the screenshot
-    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "5489903736-euc1v8ficip96b4d7jbc07ib34h7hl9e.apps.googleusercontent.com";
+    // Using your Google Client ID from environment
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "5489903736-sgf7ko4np92o2vantdjcdh8rmld507p8.apps.googleusercontent.com";
     
     if (!clientId) {
       alert("Google Client ID not configured");
