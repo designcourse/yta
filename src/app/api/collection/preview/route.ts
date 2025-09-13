@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getValidAccessToken } from "@/utils/googleAuth";
 import { aggregateYouTubeData } from "@/utils/youtube-aggregator";
 import { runNeriaAnalyzer } from "@/utils/neria-openai";
+import { runNeriaAnalyzerGemini } from "@/utils/neria-gemini";
 import { ZNeriaOutput } from "@/utils/types/neria";
 
 // Simple per-process 24h cache keyed by user+channel (for response shape)
@@ -44,7 +45,13 @@ export async function GET(request: Request) {
 
     let neriaOutput;
     try {
-      neriaOutput = await runNeriaAnalyzer(neriaInput);
+      // Prefer Gemini 2.5 Flash for speed/cost; fallback to OpenAI if it fails
+      try {
+        neriaOutput = await runNeriaAnalyzerGemini(neriaInput);
+      } catch (gErr) {
+        console.warn('[preview] Gemini analyzer failed, falling back to OpenAI', gErr);
+        neriaOutput = await runNeriaAnalyzer(neriaInput);
+      }
     } catch (e) {
       neriaOutput = {
         slides: [
