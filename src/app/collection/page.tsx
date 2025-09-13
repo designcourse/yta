@@ -9,14 +9,41 @@ const BillingModal = dynamic(() => import('@/components/BillingModal'), { ssr: f
 
 type Slide = { id: 1 | 2 | 3; headline: string; body: string; keyStats: Array<{ label: string; value: string; note?: string }>; actions: string[]; confidence: number };
 
+type Insight = {
+  type: string;
+  title: string;
+  description: string;
+  impact: number;
+  actionability: number;
+  priority: number;
+  evidence: string[];
+  actions: string[];
+  confidence: number;
+};
+
 type PreviewPayload = {
   channelMeta: { id: string; title: string; subs: number; views: number; videoCount: number; publishedAt: string };
   winners: Array<{ videoId: string; title: string; thumb: string; publishedAt?: string; duration?: string; viewsPerDay90?: number }>;
   losers: Array<{ videoId: string; title: string; thumb: string; publishedAt?: string; duration?: string; viewsPerDay90?: number }>;
   slides: Slide[];
+  insights?: {
+    topInsights: Insight[];
+    channelHealth: {
+      overall: number;
+      retention: number;
+      consistency: number;
+      growth: number;
+    };
+    growthPotential?: {
+      overall: number;
+      retention: number;
+      consistency: number;
+      growth: number;
+    };
+  };
 };
 
-const SLIDE_COUNT = 4;
+const SLIDE_COUNT = 6; // Added insights + unlock slides
 const DEFAULT_SLIDE_DURATION_MS = 9000;
 const SLIDE1_BUFFER_MS = 5000;
 
@@ -40,6 +67,8 @@ export default function CollectionPage() {
   const [slide1Done, setSlide1Done] = useState(false);
   const [slide2Done, setSlide2Done] = useState(false);
   const [slide3Done, setSlide3Done] = useState(false);
+  const [slide4Done, setSlide4Done] = useState(false);
+  const [slide5Done, setSlide5Done] = useState(false);
   const [metaAnim, setMetaAnim] = useState(false);
   const progressRef = useRef<HTMLDivElement | null>(null);
   const prefersReduced = useMemo(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
@@ -77,28 +106,6 @@ export default function CollectionPage() {
     return `${ms.endsWith('.0') ? ms.slice(0, -2) : ms}M`;
   };
 
-  // Helpers for Slide 2
-  const parseISODurationToHMS = (iso: string) => {
-    if (!iso) return '';
-    const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-    if (!match) return '';
-    const hours = Number(match[1] || 0);
-    const minutes = Number(match[2] || 0);
-    const seconds = Number(match[3] || 0);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-    return `${minutes}:${pad(seconds)}`;
-  };
-
-  const formatDate = (iso: string) => {
-    if (!iso) return '';
-    try {
-      const d = new Date(iso);
-      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    } catch {
-      return iso;
-    }
-  };
 
   const buildSlideText = (s?: Slide) => {
     if (!s) return '';
@@ -126,11 +133,11 @@ export default function CollectionPage() {
     fetchPreview();
   }, [channelId, router]);
 
-  // Check subscription status when approaching slide 4
+  // Check subscription status when approaching slide 6 (billing)
   useEffect(() => {
     const go = async () => {
       if (!channelId) return;
-      if (activeSlide !== 3) return;
+      if (activeSlide !== 5) return;
       try {
         const res = await fetch(`/api/billing/status?channelId=${encodeURIComponent(channelId)}`);
         const json = await res.json();
@@ -161,6 +168,12 @@ export default function CollectionPage() {
       if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
     } else if (activeSlide === 2) {
       setSlide3Done(false);
+      if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
+    } else if (activeSlide === 3) {
+      setSlide4Done(false);
+      if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
+    } else if (activeSlide === 4) {
+      setSlide5Done(false);
       if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
     }
   }, [activeSlide]);
@@ -222,7 +235,19 @@ export default function CollectionPage() {
       raf = requestAnimationFrame(animate);
       return () => { if (raf) cancelAnimationFrame(raf); };
     } else if (activeSlide === 3) {
-      // slide 4: billing gate, timer stops if modal shown
+      if (!slide4Done) {
+        if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
+        return;
+      }
+      start = performance.now();
+      duration = DEFAULT_SLIDE_DURATION_MS;
+      raf = requestAnimationFrame(animate);
+      return () => { if (raf) cancelAnimationFrame(raf); };
+    } else if (activeSlide === 4) {
+      // Slide 5: What You'll Unlock - no auto-advance, let user read
+      return;
+    } else if (activeSlide === 5) {
+      // slide 6: billing gate, timer stops if modal shown
       if (showBilling) return;
       start = performance.now();
       duration = DEFAULT_SLIDE_DURATION_MS;
@@ -234,7 +259,7 @@ export default function CollectionPage() {
       raf = requestAnimationFrame(animate);
       return () => { if (raf) cancelAnimationFrame(raf); };
     }
-  }, [data, activeSlide, userInteractedAt, pauseTimer, prefersReduced, slide1Done, slide2Done, slide3Done]);
+  }, [data, activeSlide, userInteractedAt, pauseTimer, prefersReduced, slide1Done, slide2Done, slide3Done, slide4Done, slide5Done, showBilling]);
 
   const onDotClick = (index: number) => {
     setUserInteractedAt(Date.now());
@@ -242,39 +267,6 @@ export default function CollectionPage() {
     if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
   };
 
-  // Lazy load for Slide 3 losers
-  const [losersLoading, setLosersLoading] = useState(false);
-  const [loserCard, setLoserCard] = useState<{ id: string; title: string; thumb: string; publishedAt?: string; duration?: string } | null>(null);
-
-  useEffect(() => {
-    const go = async () => {
-      if (activeSlide !== 2 || !data || loserCard || losersLoading) return;
-      setLosersLoading(true);
-      setLoadingPause(true);
-      try {
-        if (data.losers && data.losers.length > 0) {
-          const l = data.losers[0];
-          setLoserCard({ id: l.videoId, title: l.title, thumb: l.thumb, publishedAt: l.publishedAt, duration: l.duration });
-        } else {
-          const res = await fetch('/api/collection/losers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ids: [], channelId }),
-          });
-          if (res.ok) {
-            const json = await res.json();
-            const items = Array.isArray(json?.items) ? json.items : [];
-            setLoserCard(items[0] || null);
-          }
-        }
-      } catch {}
-      finally {
-        setLosersLoading(false);
-        setLoadingPause(false);
-      }
-    };
-    go();
-  }, [activeSlide, data, channelId, loserCard, losersLoading]);
 
   const visible = !loading && !!data;
 
@@ -325,43 +317,8 @@ export default function CollectionPage() {
             )}
 
             {activeSlide === 1 && (
-              <div className="content-stretch w-full flex flex-row gap-12 items-stretch">
-                {/* Left: YouTube video hero card for top winner by views */}
-                <div className="flex-1 min-w-[250px] max-w-[250px]">
-                  {data.winners && data.winners.length > 0 ? (
-                    (() => {
-                      const withVpd = data.winners.map(w => ({ ...w, vpd: w.viewsPerDay90 || 0 }));
-                      const top = withVpd.reduce((best, cur) => (cur.vpd > (best as any).vpd ? cur : best), withVpd[0]);
-                      return (
-                        <div className="w-full border border-black rounded-[12px] overflow-hidden bg-white shadow-[4px_4px_0_0_#000]">
-                          <div className="aspect-video w-full bg-[#f4f4f4] overflow-hidden">
-                            {top.thumb ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={top.thumb} alt={top.title} className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-black">No thumbnail</div>
-                            )}
-                          </div>
-                          <div className="p-5 flex flex-col gap-3">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-semibold px-2 py-1 border border-black rounded-full">Top performer</span>
-                              <span className="text-xs text-black/70">{top.publishedAt ? formatDate(String(top.publishedAt)) : ''}{top.duration ? ` • ${parseISODurationToHMS(String(top.duration))}` : ''}</span>
-                            </div>
-                            <div className="text-[20px] leading-snug font-semibold text-black">{top.title}</div>
-                            <div className="flex gap-6 text-sm text-black/80">
-                              <div><span className="font-semibold">VPD:</span> {Math.round(top.viewsPerDay90 || 0)}</div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <div className="w-full h-full min-h-[240px] border border-dashed border-black rounded-[12px] flex items-center justify-center text-black">No recent winners</div>
-                  )}
-                </div>
-
-                {/* Right: Neria insight with same animation/styling */}
-                <div className="flex-1 min-w-[320px]">
+              <div className="content-stretch flex items-center justify-center w-full">
+                <div className="w-full">
                   <NeriaResponse
                     response={buildSlideText(data.slides?.[1])}
                     isVisible={true}
@@ -372,38 +329,10 @@ export default function CollectionPage() {
             )}
 
             {activeSlide === 2 && (
-              <div className="content-stretch w-full flex flex-row gap-12 items-stretch">
-                {/* Left: Single worst-performer card (mirrors Slide 2) */}
-                <div className="flex-1 min-w-[250px] max-w-[250px]">
-                  {losersLoading ? (
-                    <div className="w-full min-h-[220px] flex items-center justify-center">
-                      <div className="w-10 h-10 border-4 border-gray-200 border-t-gray-700 rounded-full animate-spin" />
-                    </div>
-                  ) : loserCard ? (
-                    <div className="w-full border border-black rounded-[12px] overflow-hidden bg-white shadow-[4px_4px_0_0_#000]">
-                      <div className="aspect-video w-full bg-[#f4f4f4] overflow-hidden">
-                        {loserCard.thumb ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={loserCard.thumb} alt={loserCard.title} className="w-full h-full object-cover" />
-                        ) : null}
-                      </div>
-                      <div className="p-5 flex flex-col gap-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold px-2 py-1 border border-black rounded-full">Under-performer</span>
-                          <span className="text-xs text-black/70">{loserCard.publishedAt ? formatDate(String(loserCard.publishedAt)) : ''}{loserCard.duration ? ` • ${parseISODurationToHMS(String(loserCard.duration))}` : ''}</span>
-                        </div>
-                        <div className="text-[20px] leading-snug font-semibold text-black line-clamp-2">{loserCard.title}</div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="w-full h-full min-h-[240px] border border-dashed border-black rounded-[12px] flex items-center justify-center text-black">No under-performer</div>
-                  )}
-                </div>
-
-                {/* Right: Neria diagnosis */}
-                <div className="flex-1 min-w-[320px]">
+              <div className="content-stretch flex items-center justify-center w-full">
+                <div className="w-full">
                   <NeriaResponse
-                    response={losersLoading ? 'Analyzing the weakest theme from the last 90 days…' : buildSlideText(data.slides?.[2])}
+                    response={buildSlideText(data.slides?.[2])}
                     isVisible={true}
                     onComplete={() => setSlide3Done(true)}
                   />
@@ -412,8 +341,61 @@ export default function CollectionPage() {
             )}
 
             {activeSlide === 3 && (
+              <div className="content-stretch flex items-center justify-center w-full">
+                <div className="w-full">
+                  <NeriaResponse
+                    response={data.insights && data.insights.growthPotential 
+                      ? `Your channel is currently operating at only ${100 - data.insights.growthPotential.overall}% of its potential. That means you're leaving ${data.insights.growthPotential.overall}% of possible views, subscribers, and revenue on the table. The biggest opportunity is ${data.insights.topInsights[0]?.title.toLowerCase() || 'content optimization'}, which alone could recover ${data.insights.topInsights[0]?.evidence?.[0] || 'significant growth'}.`
+                      : `I've identified critical growth blockers in your channel. Based on channels similar to yours, you should be getting 3-5x more views. Let me show you exactly what's holding you back and how to fix it.`}
+                    isVisible={true}
+                    onComplete={() => setSlide4Done(true)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {activeSlide === 4 && (
+              <div className="content-stretch w-full">
+                <div className="w-full max-w-4xl mx-auto">
+                  <h2 className="text-3xl font-bold text-black mb-8">Here's What You'll Unlock Immediately:</h2>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                      <div className="text-2xl mb-2">🎯</div>
+                      <h3 className="font-bold text-lg mb-2">Your 7 Viral Short Moments</h3>
+                      <p className="text-sm text-black/80">Exact timestamps from your videos that match viral patterns. Copy what's working for channels getting 10M+ Short views.</p>
+                    </div>
+                    
+                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                      <div className="text-2xl mb-2">📊</div>
+                      <h3 className="font-bold text-lg mb-2">Algorithm Recovery Plan</h3>
+                      <p className="text-sm text-black/80">3 proven strategies from channels that recovered from the November algorithm change. Most see results in 3-4 weeks.</p>
+                    </div>
+                    
+                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                      <div className="text-2xl mb-2">🔍</div>
+                      <h3 className="font-bold text-lg mb-2">Competitor Blind Spots</h3>
+                      <p className="text-sm text-black/80">5 topics your competitors missed that their audience is asking for. First-mover advantage on untapped content.</p>
+                    </div>
+                    
+                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                      <div className="text-2xl mb-2">💡</div>
+                      <h3 className="font-bold text-lg mb-2">AI Script Generator</h3>
+                      <p className="text-sm text-black/80">Generate complete video scripts based on your top performers. Includes hooks, retention tactics, and CTAs that convert.</p>
+                    </div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <p className="text-lg text-black/60 mb-4">Join 1,247 creators already growing faster with Neria</p>
+                    <p className="text-sm text-red-600 font-semibold animate-pulse">⚠️ This analysis expires in 24 hours</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSlide === 5 && (
               <div className="w-full flex items-center justify-center text-black">
-                <div className="text-xl">Unlock full analytics for this channel.</div>
+                <div className="text-xl">Ready to unlock your channel's full potential?</div>
               </div>
             )}
           </div>

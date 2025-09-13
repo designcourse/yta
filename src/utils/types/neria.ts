@@ -65,6 +65,29 @@ export type NeriaOutput = {
   upgradeHook: string;
 };
 
+// Enhanced output with prioritized insights
+export type EnhancedNeriaOutput = NeriaOutput & {
+  insights?: {
+    topInsights: Array<{
+      type: string;
+      title: string;
+      description: string;
+      impact: number;
+      actionability: number;
+      priority: number;
+      evidence: string[];
+      actions: string[];
+      confidence: number;
+    }>;
+    channelHealth: {
+      overall: number;
+      retention: number;
+      consistency: number;
+      growth: number;
+    };
+  };
+};
+
 export const ZNeriaInput: z.ZodType<NeriaInput> = z.object({
   channel: z.object({
     id: z.string(),
