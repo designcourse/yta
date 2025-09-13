@@ -16,7 +16,7 @@ This is a YouTube analytics app for creators that provides AI-powered insights, 
 - **Authentication**: Supabase Auth + Google OAuth (dual-phase authentication)
 - **Payment Processing**: Stripe (subscriptions, webhooks, Elements)
 - **APIs**: YouTube Data API v3, YouTube Analytics API
-- **AI**: OpenAI GPT-4o (primary), Perplexity (real-time web search only)
+- **AI**: OpenAI GPT-4o (primary), Gemini 2.5 Flash (/collection), Perplexity (real-time web search only)
 - **3D Graphics**: Spline (@splinetool/react-spline)
 
 ## Key Architecture Patterns

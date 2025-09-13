@@ -146,11 +146,9 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
     ids: `channel==MINE`,
     startDate: formatDateISO(start),
     endDate: formatDateISO(end),
-    metrics: 'views,estimatedMinutesWatched,impressions,impressionsCtr,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost',
+    metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost',
   });
   let rollupViews = 0;
-  let rollupImpressions = 0;
-  let rollupCtr: number | null = null;
   let rollupAvgDur: number | null = null;
   let rollupAvgPct: number | null = null;
   let rollupSubsNet = 0;
@@ -161,7 +159,7 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
         ids: `channel==${channelId}`,
         startDate: formatDateISO(start),
         endDate: formatDateISO(end),
-        metrics: 'views,estimatedMinutesWatched,impressions,impressionsCtr,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost',
+        metrics: 'views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,subscribersGained,subscribersLost',
       }),
       analyticsParams,
     ];
@@ -174,12 +172,10 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
       if (Array.isArray(totals)) {
         rollupViews = Number(totals[0] ?? 0);
         const estMin = Number(totals[1] ?? 0);
-        rollupImpressions = Number(totals[2] ?? 0);
-        rollupCtr = totals[3] != null ? Number(totals[3]) : null;
-        rollupAvgDur = totals[4] != null ? Number(totals[4]) : null;
-        rollupAvgPct = totals[5] != null ? Number(totals[5]) : null;
-        const subsG = Number(totals[6] ?? 0);
-        const subsL = Number(totals[7] ?? 0);
+        rollupAvgDur = totals[2] != null ? Number(totals[2]) : null;
+        rollupAvgPct = totals[3] != null ? Number(totals[3]) : null;
+        const subsG = Number(totals[4] ?? 0);
+        const subsL = Number(totals[5] ?? 0);
         rollupSubsNet = subsG - subsL;
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const _watchTimeHours = estMin / 60;
@@ -189,7 +185,7 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
   } catch {}
 
   // PER-VIDEO ANALYTICS
-  const perVideoMap = new Map<string, { impressions: number; ctr: number | null; avgViewDur: number | null; avgViewPct: number | null; views: number }>();
+  const perVideoMap = new Map<string, { avgViewDur: number | null; avgViewPct: number | null; views: number }>();
   if (videoIds.length > 0) {
     const pvParams = new URLSearchParams({
       ids: `channel==${channelId}`,
@@ -197,7 +193,7 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
       endDate: formatDateISO(end),
       dimensions: 'video',
       filters: `video==${videoIds.join(',')}`,
-      metrics: 'impressions,impressionsCtr,averageViewDuration,averageViewPercentage,views',
+      metrics: 'views,averageViewDuration,averageViewPercentage',
     });
     try {
       let pvRes = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${pvParams.toString()}`, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -212,12 +208,10 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
         console.log('[aggregator] per-video rows', rows.length);
         for (const r of rows) {
           const vid = String(r[0] ?? '');
-          const impressions = Number(r[1] ?? 0);
-          const ctr = r[2] != null ? Number(r[2]) : null;
-          const avgViewDur = r[3] != null ? Number(r[3]) : null;
-          const avgViewPct = r[4] != null ? Number(r[4]) : null;
-          const views = Number(r[5] ?? 0);
-          perVideoMap.set(vid, { impressions, ctr, avgViewDur, avgViewPct, views });
+          const views = Number(r[1] ?? 0);
+          const avgViewDur = r[2] != null ? Number(r[2]) : null;
+          const avgViewPct = r[3] != null ? Number(r[3]) : null;
+          perVideoMap.set(vid, { avgViewDur, avgViewPct, views });
         }
       }
     } catch {}
@@ -230,7 +224,7 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
     const snippet = it?.snippet || {};
     const stats = it?.statistics || {};
     const durationSec = parseISODurationToSeconds(it?.contentDetails?.duration || '');
-    const pv = perVideoMap.get(id) || { impressions: 0, ctr: null, avgViewDur: null, avgViewPct: null, views: Number(stats?.viewCount || 0) };
+    const pv = perVideoMap.get(id) || { avgViewDur: null, avgViewPct: null, views: Number(stats?.viewCount || 0) };
     return {
       id,
       title: snippet?.title || titleMap.get(id) || '',
@@ -238,8 +232,8 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
       durationSec,
       isShort: durationSec < 61,
       views: pv.views,
-      impressions: pv.impressions,
-      ctr: pv.ctr,
+      impressions: 0, // Not available with current scope
+      ctr: null, // Not available with current scope
       avgViewDurationSec: pv.avgViewDur,
       avgViewPct: pv.avgViewPct,
       comments: Number(stats?.commentCount || 0),
@@ -260,20 +254,17 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
   // Aggregate per-video metrics if rollups missing
   const perAvgPctVals = Array.from(perVideoMap.values()).map(v => v.avgViewPct).filter((x): x is number => x != null);
   const perAvgDurVals = Array.from(perVideoMap.values()).map(v => v.avgViewDur).filter((x): x is number => x != null);
-  const perCtrVals = Array.from(perVideoMap.values()).map(v => v.ctr).filter((x): x is number => x != null);
   const mean = (arr: number[]) => arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null;
   const fallbackAvgPct = rollupAvgPct == null ? mean(perAvgPctVals) : rollupAvgPct;
   const fallbackAvgDur = rollupAvgDur == null ? mean(perAvgDurVals) : rollupAvgDur;
-  const fallbackCtr = rollupCtr == null ? mean(perCtrVals) : rollupCtr;
-  console.log('[aggregator] per-video metrics counts', { avgPct: perAvgPctVals.length, avgDur: perAvgDurVals.length, ctr: perCtrVals.length });
-  console.log('[aggregator] rollup/fallback avgPct', fallbackAvgPct, 'avgDur', fallbackAvgDur, 'ctr', fallbackCtr);
+  console.log('[aggregator] per-video metrics counts', { avgPct: perAvgPctVals.length, avgDur: perAvgDurVals.length });
+  console.log('[aggregator] rollup/fallback avgPct', fallbackAvgPct, 'avgDur', fallbackAvgDur);
 
   const rollupWatchTimeHours = null as unknown as number | null; // not strictly needed in UI; kept for schema
   const dataGaps: string[] = [];
-  const hasPerVideoCtr = Array.from(perVideoMap.values()).some(v => v.ctr != null);
   const hasPerVideoAvgPct = Array.from(perVideoMap.values()).some(v => v.avgViewPct != null);
-  if (rollupCtr == null && !hasPerVideoCtr) dataGaps.push('ctr');
   if (rollupAvgPct == null && !hasPerVideoAvgPct) dataGaps.push('avgViewPct');
+  // Note: CTR and impressions require monetization scope which is not currently requested
 
   const neriaInput: NeriaInput = {
     channel: {
@@ -300,8 +291,8 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
         watchTimeHours: rollupWatchTimeHours ?? 0,
         avgViewDurationSec: fallbackAvgDur,
         avgViewPct: fallbackAvgPct,
-        impressions: rollupImpressions,
-        ctr: fallbackCtr,
+        impressions: 0, // Not available with current scope
+        ctr: null, // Not available with current scope
         subsNet: rollupSubsNet,
       },
     },
@@ -357,5 +348,6 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
 
   return { neriaInput, winners, losers, lifetimeViews: totalViews };
 }
+
 
 

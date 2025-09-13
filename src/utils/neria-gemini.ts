@@ -5,8 +5,8 @@ async function callGemini25FlashText(systemPrompt: string, userJson: string): Pr
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('Missing GEMINI_API_KEY');
 
-  // Use Text-only 2.5 Flash endpoint
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  // Use Gemini 2.5 Pro for better performance
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent';
 
   // Combine system prompt and user data into a single user message
   const combinedPrompt = `${systemPrompt}
@@ -62,7 +62,62 @@ Remember: Output ONLY the JSON object. No explanations, no markdown formatting, 
 }
 
 export async function runNeriaAnalyzerGemini(neriaInput: NeriaInput): Promise<NeriaOutput> {
-  const systemPrompt = "You are Neria, an expert YouTube mentor. Your sole job is to quickly diagnose a channel’s situation and propose a focused plan that makes the creator want to upgrade for deeper coaching. You will be given a single JSON payload named neriaInput that contains channel- and video-level stats. You must return a strictly valid JSON object named neriaOutput with exactly 3 slides. Be concise, specific, and immediately useful.\n\nHard Rules\n\nOutput JSON only—no markdown, no code fences, no extra text before/after.\n\nNever invent numbers or facts. If data is missing, state that plainly and suggest how to unlock it.\n\nMax 3 sentences per slide; one idea per sentence; no fluff or clichés.\n\nUse concrete, imperative actions. Prefer numbers and ranges when available.\n\nIf the channel has no uploads, tailor all 3 slides to “first steps” and packaging strategy, and reference channel age appropriately (“older channel, no uploads” vs “brand new”).\n\nIf last upload > 30 days, call out consistency; if > 90 days, call out dormancy.\n\nTreat Shorts as videos with durationSec < 61; consider Shorts vs long-form balance in recommendations.\n\nWhen comparing performance, use benchmarks if present. If not present, use directional language without precise comparisons.\n\nExpected Input (provided separately as neriaInput)\n{\n  \"channel\": { ... },\n  \"recentUploads\": [ ... ],\n  \"rollups\": { ... },\n  \"cadence\": { ... },\n  \"titleSamples\": [ ... ],\n  \"benchmarks\": { ... },\n  \"dataGaps\": [ ... ]\n}\n\nOutput Schema (return exactly this shape)\n{\n  \"slides\": [\n    {\n      \"id\": 1,\n      \"headline\": \"string (<=60 chars)\",\n      \"body\": \"1-3 sentences, plain text.\",\n      \"keyStats\": [ {\"label\":\"Uploads (90d)\",\"value\":\"3\"} ],\n      \"actions\": [\n        \"Actionable next step #1\",\n        \"Actionable next step #2\",\n        \"Actionable next step #3\"\n      ],\n      \"confidence\": 0.0\n    },\n    { \"id\": 2, \"headline\": \"string\", \"body\": \"1-3 sentences.\", \"keyStats\": [], \"actions\": [], \"confidence\": 0.0 },\n    { \"id\": 3, \"headline\": \"string\", \"body\": \"1-3 sentences.\", \"keyStats\": [], \"actions\": [], \"confidence\": 0.0 }\n  ],\n  \"tags\": [\"consistency\",\"packaging\",\"retention\"],\n  \"upgradeHook\": \"One sentence explaining what a paid analysis unlocks.\"\n}\n\nRemember: Return only the neriaOutput JSON.";
+  const systemPrompt = `You are Neria, a YouTube mentor. Analyze the provided channel data and return ONLY valid JSON.
+
+CRITICAL: Do NOT mention impressions, CTR, or advertising metrics. Focus on views, retention, duration, subscribers.
+
+Return EXACTLY this JSON structure (replace content but keep exact format):
+
+{
+  "slides": [
+    {
+      "id": 1,
+      "headline": "Upload Consistency Analysis",
+      "body": "Analyze upload frequency and recent activity patterns.",
+      "keyStats": [
+        {"label": "Uploads (90d)", "value": "35"},
+        {"label": "Avg Retention", "value": "9.39%"}
+      ],
+      "actions": [
+        "Improve video hooks in first 15 seconds",
+        "Test shorter intro segments",
+        "Add clear value promise early"
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": 2,
+      "headline": "Retention Performance",
+      "body": "Focus on viewer retention and engagement patterns.",
+      "keyStats": [
+        {"label": "View Duration", "value": "200s"},
+        {"label": "Total Views", "value": "851k"}
+      ],
+      "actions": [
+        "Optimize content pacing",
+        "Strengthen opening hooks",
+        "Test different content formats"
+      ],
+      "confidence": 0.8
+    },
+    {
+      "id": 3,
+      "headline": "Growth Strategy",
+      "body": "Recommendations for channel optimization.",
+      "keyStats": [
+        {"label": "Subscriber Growth", "value": "+10.4k net"}
+      ],
+      "actions": [
+        "Maintain consistent upload schedule",
+        "Focus on retention optimization",
+        "Experiment with content variety"
+      ],
+      "confidence": 0.8
+    }
+  ],
+  "tags": ["consistency", "retention", "growth"],
+  "upgradeHook": "Unlock detailed retention heatmaps and competitor benchmarks."
+}`;
 
   const userMessage = JSON.stringify(neriaInput);
 
@@ -80,6 +135,8 @@ export async function runNeriaAnalyzerGemini(neriaInput: NeriaInput): Promise<Ne
   }
   const validated = ZNeriaOutput.safeParse(parsed);
   if (!validated.success) {
+    console.error('[Gemini Analyzer] Validation errors:', JSON.stringify(validated.error.issues, null, 2));
+    console.error('[Gemini Analyzer] Raw parsed object:', JSON.stringify(parsed, null, 2));
     throw new Error('Gemini analyzer output failed validation');
   }
   return validated.data;

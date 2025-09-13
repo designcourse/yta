@@ -37,8 +37,8 @@ export default function YouTubeConnectPage() {
       response_type: "code",
       scope: "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
       access_type: "offline",
-      prompt: "consent",
-      include_granted_scopes: "true",
+      prompt: "consent", // Reverting to 'consent' for another attempt at forcing a fresh screen
+      // include_granted_scopes: "true", // Temporarily removed to force fresh consent
       state: currentUserId, // Pass the current user ID
     });
 
