@@ -47,10 +47,22 @@ export async function GET(request: Request) {
 
     // Gather arrays for metrics (only numbers)
     const values = {
-      ctr_24h: comparable.map((m) => Number(m.ctr)).filter((x) => Number.isFinite(x)),
-      avd_24h: comparable.map((m) => Number(m.avg_view_duration_sec)).filter((x) => Number.isFinite(x)),
-      vpd_24h: comparable.map((m) => Number(m.views_per_day)).filter((x) => Number.isFinite(x)),
-      retention_pct: comparable.map((m) => Number(m.avg_view_pct)).filter((x) => Number.isFinite(x)),
+      ctr_24h: comparable
+        .map((m) => m.ctr)
+        .filter((v): v is number => v != null && Number.isFinite(Number(v)))
+        .map((v) => Number(v)),
+      avd_24h: comparable
+        .map((m) => m.avg_view_duration_sec)
+        .filter((v): v is number => v != null && Number.isFinite(Number(v)))
+        .map((v) => Number(v)),
+      vpd_24h: comparable
+        .map((m) => m.views_per_day)
+        .filter((v): v is number => v != null && Number.isFinite(Number(v)))
+        .map((v) => Number(v)),
+      retention_pct: comparable
+        .map((m) => m.avg_view_pct)
+        .filter((v): v is number => v != null && Number.isFinite(Number(v)))
+        .map((v) => Number(v)),
     } as const;
 
     const quantiles = {

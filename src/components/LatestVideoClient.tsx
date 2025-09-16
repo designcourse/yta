@@ -23,6 +23,7 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const [kpis, setKpis] = useState<any | null>(null);
   const [kpisLoading, setKpisLoading] = useState(false);
+  const [dismissRescue, setDismissRescue] = useState(false);
 
   useEffect(() => {
     if (channelId) {
@@ -98,6 +99,44 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
     setShowContainer(false);
     fetchLatestVideo(true);
   };
+
+  // Compute early-velocity rescue signal (proxy until CTR_1h available)
+  const rescue = (() => {
+    try {
+      if (!videoData || !kpis || dismissRescue) return null;
+      // Determine the publishedAt for the card being shown
+      let publishedAtISO: string | null = videoData.published_at || null;
+      if (selectedVideoId && recent.length > 0) {
+        const sel = recent.find(v => v.id === selectedVideoId);
+        if (sel?.publishedAt) publishedAtISO = sel.publishedAt;
+      }
+      if (!publishedAtISO) return null;
+      const hoursSince = Math.max(0.01, (Date.now() - new Date(publishedAtISO).getTime()) / 3600000);
+      // Only evaluate rescue in the first 24h window; avoid ultra-early jitter < 30m
+      if (hoursSince < 0.5 || hoursSince > 24) return null;
+      const currentViews = (selectedVideoId && recent.length > 0)
+        ? (recent.find(v => v.id === selectedVideoId)?.viewCount || 0)
+        : (videoData.view_count || 0);
+      const vph = currentViews / hoursSince;
+      const baseVpd = kpis?.baselines?.vpd_24h;
+      if (!baseVpd || baseVpd.q1 == null) return null;
+      const vphP25 = baseVpd.q1 / 24;
+      // Guard: do not suggest rescue if AVD penalty is likely (below lower threshold)
+      const baseAvd = kpis?.baselines?.avd_24h;
+      const curAvd = kpis?.current?.avd_24h as number | null | undefined;
+      let noAvdPenalty = true;
+      if (baseAvd && typeof curAvd === 'number') {
+        const lower = baseAvd.median - 0.5 * baseAvd.iqr;
+        noAvdPenalty = curAvd >= lower;
+      }
+      if (Number.isFinite(vph) && Number.isFinite(vphP25) && vph < vphP25 && noAvdPenalty) {
+        return { hoursSince, vph, vphP25 };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  })();
 
   return (
     <div className="space-y-6">
@@ -207,6 +246,29 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
               </div>
             )}
           </div>
+
+          {/* Early Rescue Prompt (proxy using views/hour vs baseline P25) */}
+          {rescue && (
+            <div className="mt-4 border border-yellow-300 bg-yellow-50 rounded-lg p-4 text-black">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="font-semibold">Rescue opportunity (packaging)</div>
+                  <div className="text-sm text-black/80 mt-1">
+                    Views/hour {Math.round(rescue.vph * 100) / 100} is below comparable P25 {Math.round(rescue.vphP25 * 100) / 100} within the first {Math.round(rescue.hoursSince * 10) / 10}h.
+                  </div>
+                  <ul className="mt-2 text-sm list-disc pl-5 space-y-1">
+                    <li>Clarify the promise in the first 50 characters of the title.</li>
+                    <li>Increase thumbnail subject size and contrast; reduce on-image text.</li>
+                    <li>Add a specific outcome or number; avoid jargon.</li>
+                  </ul>
+                </div>
+                <button
+                  className="text-xs text-black/60 hover:text-black"
+                  onClick={() => setDismissRescue(true)}
+                >Dismiss</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

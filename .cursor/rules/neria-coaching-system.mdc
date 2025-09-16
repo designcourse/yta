@@ -67,18 +67,40 @@ description: Neria coaching system plan — baselines, KPIs, guardrails, and pri
 Legend: [ ] planned  [ ] in progress  [ ] QA  [ ] done
 
 1) Baseline Engine and Comparable Sets
-- [ ] [src/utils/insights-analyzer.ts](mdc:src/utils/insights-analyzer.ts): add comparable-set selection (format/topic/length/traffic mix).
-- [ ] Compute rolling median + IQR for CTR_24h, AVD_24h, VPH_24h, WTPI_24h, SVR_24h per comparable set.
-- [ ] Persist daily snapshots (proposed tables): `video_metrics`, `comparable_baselines`.
-- [ ] API: [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts) returns metrics, baselines, thresholds, confidence.
+- [x] [src/utils/insights-analyzer.ts](mdc:src/utils/insights-analyzer.ts): add comparable-set selection (format/topic/length/traffic mix).
+- [x] Compute rolling median + IQR for CTR_24h, AVD_24h, VPH_24h, WTPI_24h, SVR_24h per comparable set.
+- [x] Persist daily snapshots (proposed tables): `video_metrics`, `comparable_baselines`.
+- [x] API: [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts) returns metrics, baselines, thresholds, confidence.
 
 Acceptance:
 - Returns baselines for each lever and a success verdict per video at T+24h with confidence.
 
 2) Latest Video Analyzer (T+1h, T+24h)
-- [ ] Page: [src/app/dashboard/[channelId]/latest-video/page.tsx](mdc:src/app/dashboard/[channelId]/latest-video/page.tsx) renders early and 24h KPIs vs baselines.
-- [ ] Shows rescue prompt if early CTR < P25 at T+1h with safe title/thumbnail guidance.
-- [ ] API: [src/app/api/dashboard/video/[videoId]/analysis/route.ts](mdc:src/app/api/dashboard/video/[videoId]/analysis/route.ts) integrates YT Analytics for windows.
+- [x] Page: [src/app/dashboard/[channelId]/latest-video/page.tsx](mdc:src/app/dashboard/[channelId]/latest-video/page.tsx) renders KPIs vs baselines using `LatestVideoClient`.
+  - Uses `RefreshContainer` to show last updated and force-refresh snapshot.
+  - Includes a debug dropdown (last 10 public videos) backed by `/api/channel-recent-videos` to switch the analyzed video.
+- [x] KPI card: shows comparable-set dims (format/lengthBand/topicCluster) + confidence; badges per metric with Current and Baseline median±IQR.
+  - Metrics: `ctr_24h`, `avd_24h` (sec), `vpd_24h`, `retention_pct`.
+  - Verdicts computed via thresholds (`median ± 0.5×IQR`).
+- [x] APIs in use (implemented):
+  - Latest snapshot: [src/app/api/latest-video/route.ts](mdc:src/app/api/latest-video/route.ts)
+    - GET params: `channelId`
+    - POST body: `{ channelId }` (forces refresh)
+    - Response: `{ video: { channel_id, user_id, video_id, video_title, thumbnail_url, view_count, comment_count, published_at, stats_retrieved_at }, fromCache }`
+  - Recent videos: [src/app/api/channel-recent-videos/route.ts](mdc:src/app/api/channel-recent-videos/route.ts)
+    - GET params: `channelId`
+    - Response: `{ videos: Array<{ id, title, thumbnails, publishedAt, viewCount, commentCount, duration }> }`
+  - KPIs vs baselines: [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts)
+    - GET params: `channelId`, optional `videoId`
+    - Response: `{ channelId, videoId, comparable: { count, dims: { format, lengthBand, topicCluster }, confidence }, baselines: { ctr_24h, avd_24h, vpd_24h, retention_pct }, current: { ...same keys }, verdicts: { ...same keys } }`
+- [x] Retention+transcript insights API (replaces proposed per-video analysis route):
+  - [src/app/api/latest-video-insights/route.ts](mdc:src/app/api/latest-video-insights/route.ts)
+    - GET params: `channelId`, optional `videoId` (uses latest snapshot if omitted)
+    - Response: `{ videoId, durationSec, retention, samples: Array<{ time, pct, awr?, rrp?, excerpt }>, insights: Array<{ time, pct, insight, suggestion }>, hookExcerpt }`
+- [x] Rescue prompt (UI): shows only if early velocity is below P25 with no AVD penalty.
+  - Current proxy trigger (until CTR_1h available): `views_per_hour_since_publish < (vpd_24h.q1 / 24)` AND `avd_24h >= median - 0.5×IQR`.
+  - Implementation: inline card in `LatestVideoClient` with title/thumbnail best-practice guidance and Dismiss.
+  - Future: replace proxy with CTR_1h once `/api/dashboard/kpis?window=1h` or Analytics CTR is available.
 
 Acceptance:
 - Renders early and 24h verdicts; displays actionable rescue only when thresholds trigger.
@@ -143,7 +165,9 @@ Acceptance:
 - Tables (additive, with RLS): `video_metrics`, `comparable_baselines`, `experiments`, `goals` (or reuse `channel_strategy`), `competitors`.
 - APIs:
   - `GET /api/dashboard/kpis` → baselines, thresholds, verdicts.
-  - `GET /api/dashboard/video/:id/analysis` → T+1h/24h/7d KPIs.
+  - `GET /api/latest-video` → latest snapshot for channel; `POST /api/latest-video` forces refresh.
+  - `GET /api/channel-recent-videos` → last 10 public uploads with stats.
+  - `GET /api/latest-video-insights` → per-video retention samples + transcript-based insights.
   - `POST /api/experiments` / `PATCH /api/experiments/:id` → backlog + outcomes.
   - `GET/POST /api/goals` → goal weights.
   - `GET/POST /api/competitors` → competitor set, public stats.
@@ -160,9 +184,15 @@ Acceptance:
 References:
 - [src/utils/insights-analyzer.ts](mdc:src/utils/insights-analyzer.ts)
 - [src/app/dashboard/[channelId]/latest-video/page.tsx](mdc:src/app/dashboard/[channelId]/latest-video/page.tsx)
+- [src/components/LatestVideoClient.tsx](mdc:src/components/LatestVideoClient.tsx)
+- [src/components/LastVideoContainer.tsx](mdc:src/components/LastVideoContainer.tsx)
 - [src/components/NeriaContainer.tsx](mdc:src/components/NeriaContainer.tsx)
 - [src/app/dashboard/[channelId]/my-goals/page.tsx](mdc:src/app/dashboard/[channelId]/my-goals/page.tsx)
 - [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx)
 - [src/utils/neria-openai.ts](mdc:src/utils/neria-openai.ts)
 - [tests/e2e/dashboard/neria-chat.spec.ts](mdc:tests/e2e/dashboard/neria-chat.spec.ts)
+- [src/app/api/latest-video/route.ts](mdc:src/app/api/latest-video/route.ts)
+- [src/app/api/channel-recent-videos/route.ts](mdc:src/app/api/channel-recent-videos/route.ts)
+- [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts)
+- [src/app/api/latest-video-insights/route.ts](mdc:src/app/api/latest-video-insights/route.ts)
 
