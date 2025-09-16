@@ -106,17 +106,19 @@ Acceptance:
 - Renders early and 24h verdicts; displays actionable rescue only when thresholds trigger.
 
 3) Coaching Action + Next Experiment
-- [ ] Component: [src/components/NeriaContainer.tsx](mdc:src/components/NeriaContainer.tsx) exposes a “Next Experiment” panel.
-- [ ] LLM prompt grounding: pass KPIs, baselines, verdict, and lever decision; 1 primary recommendation.
-- [ ] Persist experiments (proposed table): `experiments` with target lever, hypothesis, outcome.
+- [x] Component: [src/components/NeriaContainer.tsx](mdc:src/components/NeriaContainer.tsx) exposes a “Next Experiment” panel (loads KPIs, proposes, and saves).
+- [x] LLM prompt grounding: seeded by verdicts (CTR/AVD/VPD/retention) with deterministic fallback; exactly 1 primary recommendation.
+- [x] Persist experiments table: `experiments` with RLS; fields include `lever`, `hypothesis`, `recommendation.steps`, plus `baselines`, `current`, `verdicts`, `comparable`; unique per `(user_id, channel_id, video_id)`.
+- [x] APIs: `GET/POST /api/experiments` (fetch/save) and `POST /api/experiments/propose` (LLM proposal seeded by verdicts).
 
 Acceptance:
-- Exactly one primary experiment recommended per upload, stored with verdict for later review.
+- Next Experiment card renders in Neria after KPIs load; Save creates/updates exactly one experiment per upload.
+- Persisted record includes lever, hypothesis, steps, and traceability payloads (`baselines/current/verdicts/comparable`).
 
 4) Hypothesis Backlog and Outcomes
-- [ ] Page: [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx) adds a backlog section filtered by lever.
-- [ ] API: [src/app/api/experiments](mdc:src/app/api/experiments) CRUD for hypotheses, linkage to uploads, outcomes auto-filled at T+24h/7d.
-- [ ] Trend widget: win rate by lever over last 10 uploads.
+- [x] Page: [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx) adds a backlog section filtered by lever.
+- [x] API: [src/app/api/experiments](mdc:src/app/api/experiments) CRUD for hypotheses, linkage to uploads, outcomes auto-filled at T+24h.
+- [x] Trend widget: win rate by lever over recent uploads.
 
 Acceptance:
 - Backlog items auto-resolved with outcomes; lever win rates visible.

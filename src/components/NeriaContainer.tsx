@@ -62,6 +62,8 @@ const NeriaContainer: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<Array<{ id: string; role: string; content: string; created_at: string }>>([]);
+  const [nextExperiment, setNextExperiment] = useState<null | { lever: string; hypothesis: string; steps: string[]; savedId?: string }>(null);
+  const [experimentLoading, setExperimentLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [sending, setSending] = useState(false);
@@ -91,6 +93,42 @@ const NeriaContainer: React.FC = () => {
       } catch {}
     })();
   }, [supabase]);
+
+  // Load or propose Next Experiment when channel changes
+  useEffect(() => {
+    (async () => {
+      try {
+        setExperimentLoading(true);
+        setNextExperiment(null);
+        if (!currentChannelId) return;
+        // Get KPIs for latest video
+        const kRes = await fetch(`/api/dashboard/kpis?channelId=${encodeURIComponent(currentChannelId)}`);
+        if (!kRes.ok) return;
+        const k = await kRes.json();
+        // Try existing experiment first
+        const eRes = await fetch(`/api/experiments?channelId=${encodeURIComponent(currentChannelId)}&videoId=${encodeURIComponent(k.videoId || '')}`);
+        if (eRes.ok) {
+          const ej = await eRes.json();
+          if (ej?.latest?.id) {
+            setNextExperiment({ lever: ej.latest.lever, hypothesis: ej.latest.hypothesis, steps: (ej.latest.recommendation?.steps || []), savedId: ej.latest.id });
+            return;
+          }
+        }
+        // No saved experiment: propose client-side via server helper
+        const pRes = await fetch('/api/experiments/propose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kpisBundle: k })
+        });
+        if (!pRes.ok) return;
+        const pj = await pRes.json();
+        setNextExperiment(pj?.proposal || null);
+      } catch {}
+      finally {
+        setExperimentLoading(false);
+      }
+    })();
+  }, [currentChannelId]);
 
   // When thumbnail mode is activated, show a guiding message and prevent normal chat routing
   useEffect(() => {
@@ -744,6 +782,46 @@ const NeriaContainer: React.FC = () => {
             {/* Message Container */}
             {!isMinimized && (
               <div className="flex-1 overflow-y-auto space-y-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-transparent scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                {/* Next Experiment Panel */}
+                {(!experimentLoading && nextExperiment) && (
+                  <div className="p-4 rounded-md" style={{ backgroundColor: '#2a2c3a', border: '1px solid rgba(255,255,255,0.12)' }}>
+                    <div className="text-white text-sm opacity-80 mb-1">Next Experiment</div>
+                    <div className="text-white text-base font-medium mb-2 capitalize">Target lever: {nextExperiment.lever}</div>
+                    <div className="text-white/90 mb-2">{nextExperiment.hypothesis}</div>
+                    {Array.isArray(nextExperiment.steps) && nextExperiment.steps.length > 0 && (
+                      <ul className="list-disc pl-5 text-white/80 text-sm space-y-1">
+                        {nextExperiment.steps.map((s, i) => (<li key={i}>{s}</li>))}
+                      </ul>
+                    )}
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        className="px-3 py-2 text-sm rounded-md font-semibold"
+                        style={{ backgroundColor: '#3086ff', color: '#fff' }}
+                        disabled={!!nextExperiment.savedId}
+                        onClick={async () => {
+                          try {
+                            if (!currentChannelId) return;
+                            const kRes = await fetch(`/api/dashboard/kpis?channelId=${encodeURIComponent(currentChannelId)}`);
+                            if (!kRes.ok) return;
+                            const k = await kRes.json();
+                            const payload = {
+                              channelId: k.channelId,
+                              videoId: k.videoId,
+                              lever: nextExperiment.lever,
+                              hypothesis: nextExperiment.hypothesis,
+                              recommendation: { steps: nextExperiment.steps },
+                              kpisBundle: k
+                            };
+                            const sRes = await fetch('/api/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                            if (!sRes.ok) return;
+                            const sj = await sRes.json();
+                            if (sj?.experiment?.id) setNextExperiment({ ...nextExperiment, savedId: sj.experiment.id });
+                          } catch {}
+                        }}
+                      >{nextExperiment.savedId ? 'Saved' : 'Save Experiment'}</button>
+                    </div>
+                  </div>
+                )}
                 {initialLoading && (
                   <div className="text-white/70 text-sm">Loading conversation…</div>
                 )}

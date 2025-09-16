@@ -1,4 +1,5 @@
 import YouTubeStats from "@/components/YouTubeStats";
+import ExperimentsBacklog from "@/components/ExperimentsBacklog";
 
 export default async function ChannelDashboardPage({
   params,
@@ -8,7 +9,11 @@ export default async function ChannelDashboardPage({
   const resolvedParams = await params;
   const channelId = resolvedParams.channelId;
 
+  const decoded = decodeURIComponent(channelId);
   return (
-    <YouTubeStats channelId={decodeURIComponent(channelId)} />
+    <div className="space-y-6">
+      <YouTubeStats channelId={decoded} />
+      <ExperimentsBacklog channelId={decoded} />
+    </div>
   );
 }
