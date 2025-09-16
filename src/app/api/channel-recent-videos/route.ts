@@ -51,7 +51,7 @@ export async function GET(request: Request) {
     if (ids.length === 0) return NextResponse.json({ videos: [] });
 
     const videosRes = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${ids.join(',')}`,
+      `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails,status&id=${ids.join(',')}`,
       { headers: { Authorization: `Bearer ${token.accessToken}` } }
     );
     if (!videosRes.ok) {
@@ -59,7 +59,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'videos.list failed', details: t }, { status: 500 });
     }
     const vjson = await videosRes.json();
-    const videos = (vjson.items || []).map((v: any) => ({
+    const items: any[] = Array.isArray(vjson?.items) ? vjson.items : [];
+    const publicItems = items.filter((v: any) => (v?.status?.privacyStatus || 'public') === 'public');
+    const videos = publicItems.map((v: any) => ({
       id: v.id,
       title: v.snippet?.title,
       thumbnails: v.snippet?.thumbnails,

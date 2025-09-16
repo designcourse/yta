@@ -19,10 +19,10 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showContainer, setShowContainer] = useState(false);
-  const [insights, setInsights] = useState<any | null>(null);
-  const [insightsLoading, setInsightsLoading] = useState(false);
   const [recent, setRecent] = useState<Array<any>>([]);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const [kpis, setKpis] = useState<any | null>(null);
+  const [kpisLoading, setKpisLoading] = useState(false);
 
   useEffect(() => {
     if (channelId) {
@@ -62,8 +62,8 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
       const data = await response.json();
       setVideoData(data.video);
       setTimeout(() => setShowContainer(true), 50);
-      // Load insights after snapshot available
-      fetchInsights();
+      // Load KPIs after snapshot available
+      fetchKpis();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       console.error('Error fetching latest video:', err);
@@ -72,24 +72,25 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
     }
   };
 
-  const fetchInsights = async () => {
+  const fetchKpis = async (overrideVideoId?: string | null) => {
     if (!channelId) return;
     try {
-      setInsightsLoading(true);
-      const url = selectedVideoId
-        ? `/api/latest-video-insights?channelId=${encodeURIComponent(channelId)}&videoId=${encodeURIComponent(selectedVideoId)}`
-        : `/api/latest-video-insights?channelId=${encodeURIComponent(channelId)}`;
+      setKpisLoading(true);
+      const id = overrideVideoId !== undefined ? overrideVideoId : selectedVideoId;
+      const url = id
+        ? `/api/dashboard/kpis?channelId=${encodeURIComponent(channelId)}&videoId=${encodeURIComponent(id)}`
+        : `/api/dashboard/kpis?channelId=${encodeURIComponent(channelId)}`;
       const res = await fetch(url);
       if (res.ok) {
         const j = await res.json();
-        setInsights(j);
+        setKpis(j);
       } else {
-        setInsights(null);
+        setKpis(null);
       }
-    } catch (e) {
-      setInsights(null);
+    } catch {
+      setKpis(null);
     } finally {
-      setInsightsLoading(false);
+      setKpisLoading(false);
     }
   };
 
@@ -113,7 +114,7 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
           <select
             className="text-sm border rounded px-2 py-1"
             value={selectedVideoId || ''}
-            onChange={(e) => { setSelectedVideoId(e.target.value || null); fetchInsights(); }}
+            onChange={(e) => { const next = e.target.value || null; setSelectedVideoId(next); fetchKpis(next); }}
           >
             <option value="">Latest</option>
             {recent.map((v) => (
@@ -155,59 +156,54 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
           ) : (
             <LastVideoContainer videoData={videoData} />
           )}
-          {/* Insights Section */}
+
+          {/* KPIs vs Baselines */}
           <div className="mt-8 bg-white border border-white/20 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-black font-medium">Retention & Transcript Insights</h3>
+              <h3 className="text-black font-medium">KPIs vs Baselines (comparable set)</h3>
               <button
                 className="text-sm text-blue-600 hover:text-blue-700"
-                onClick={fetchInsights}
-                disabled={insightsLoading}
-              >{insightsLoading ? 'Refreshing…' : 'Refresh insights'}</button>
+                onClick={() => { fetchKpis(); }}
+                disabled={kpisLoading}
+              >{kpisLoading ? 'Refreshing…' : 'Refresh KPIs'}</button>
             </div>
-            {!insights && !insightsLoading && (
-              <div className="text-black/70 text-sm">No insights yet. Click Refresh insights.</div>
+            {!kpis && !kpisLoading && (
+              <div className="text-black/70 text-sm">No KPIs yet. Click Refresh KPIs.</div>
             )}
-            {insightsLoading && (
-              <div className="text-black/70 text-sm">Analyzing latest video…</div>
-            )}
-            {insights && (
-              <div className="space-y-3 text-sm text-black">
-                {insights.hookExcerpt && (
-                  <div className="bg-gray-50 rounded p-3 border border-gray-200">
-                    <div className="font-medium mb-1">Hook Transcript (first ~20s)</div>
-                    <div className="text-gray-700">{insights.hookExcerpt}</div>
-                  </div>
-                )}
-                {/* Simple retention chart (relativeRetentionPerformance) */}
-                {Array.isArray(insights.retention) && insights.retention.length > 0 && (
-                  <div className="bg-gray-50 rounded p-3 border border-gray-200">
-                    <div className="font-medium mb-2">Relative Retention Timeline</div>
-                    <div className="w-full h-24 flex items-end gap-1">
-                      {insights.retention.map((r: any, idx: number) => {
-                        const pct = Number(String(r[0]).replace('%',''));
-                        const val = typeof r[2] === 'number' ? r[2] : 0; // rrp
-                        const h = Math.max(2, Math.min(96, Math.round(val * 80)));
-                        return (
-                          <div key={idx} title={`${pct}% • ${val.toFixed ? val.toFixed(2) : val}`}
-                            className="bg-blue-500" style={{ width: '1.5%', height: `${h}px` }} />
-                        );
-                      })}
-                    </div>
-                    <div className="text-xs text-gray-600 mt-1">Bars reflect relativeRetentionPerformance (1.0 = average peers)</div>
-                  </div>
-                )}
-                {Array.isArray(insights.insights) && insights.insights.length > 0 ? (
-                  insights.insights.map((it: any, idx: number) => (
-                    <div key={idx} className="bg-gray-50 rounded p-3 border border-gray-200">
-                      <div className="text-black font-medium">{new Date(it.time * 1000).toISOString().substr(11, 8)} (≈{Math.round(it.pct)}%)</div>
-                      <div className="mt-1 text-gray-800">{it.insight}</div>
-                      <div className="mt-1 text-blue-700">Suggestion: {it.suggestion}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-black/70">No actionable points detected.</div>
-                )}
+            {kpis && (
+              <div className="text-sm text-black space-y-2">
+                <div className="text-black/70">Comparable set: {kpis?.comparable?.count ?? 0} • format {kpis?.comparable?.dims?.format} • length {kpis?.comparable?.dims?.lengthBand || '—'} • confidence {kpis?.comparable?.confidence}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {[
+                    { key: 'avd_24h', label: 'Avg View Duration (s)' },
+                    { key: 'retention_pct', label: 'Retention (%)' },
+                    { key: 'vpd_24h', label: 'Views/Day' },
+                    { key: 'ctr_24h', label: 'CTR (24h)' },
+                  ].map((m) => {
+                    const verdict = kpis?.verdicts?.[m.key] as string | undefined;
+                    const currentVal = kpis?.current?.[m.key];
+                    const base = kpis?.baselines?.[m.key];
+                    const badge = verdict === 'pass' ? 'bg-green-100 text-green-700 border-green-200'
+                      : verdict === 'fail' ? 'bg-red-100 text-red-700 border-red-200'
+                      : verdict === 'neutral' ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                      : 'bg-gray-50 text-gray-600 border-gray-200';
+                    const fmt = (v: any) => v == null ? '—' : typeof v === 'number' ? (m.key === 'retention_pct' ? (Math.round(v * 100) / 100).toFixed(2) : Math.round(v * 100) / 100) : String(v);
+                    return (
+                      <div key={m.key} className={`border rounded p-3 ${badge}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="font-medium">{m.label}</div>
+                          <div className="text-xs uppercase tracking-wide">{verdict || 'unknown'}</div>
+                        </div>
+                        <div className="mt-1 text-black/80">
+                          Current: <span className="font-medium">{fmt(currentVal)}</span>
+                        </div>
+                        <div className="mt-0.5 text-black/70">
+                          Baseline median±IQR: {base ? `${fmt(base.median)} ± ${fmt(base.iqr)}` : '—'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>

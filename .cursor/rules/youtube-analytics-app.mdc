@@ -185,26 +185,43 @@ This context document should guide all development decisions and ensure consiste
 - Stat icons use fixed height with `object-contain` to preserve aspect ratio and align labels; metadata block is top-aligned.
 - Layout includes ~70px bottom padding under the metadata for breathing room.
 
-### Slides Implementation
+### Slides Implementation (Updated with Insights-Driven Approach)
 
-#### Slide 1 (Channel Overview)
-- Channel metadata with animated entrance
-- Neria greeting with system prompt `collection_greeting`
+#### Slide 1 (Top Priority Issue)
+- Displays the highest-priority insight from the insights analyzer
+- Shows specific, actionable problem with quantified impact
+- Example: "Missing ~3.5M Monthly Views" with teaser about viral Shorts opportunities
 - Timer starts after animation completes + 5s buffer
 
-#### Slide 2 (Top Performer Analysis)
-- Left: 250px video card showing best performer by viewsPerDay (90d normalized)
-- Right: Neria insight using system prompt `collection_winners_theme`
-- Timer starts after Neria animation completes
-- Analyzes up to 10 top video titles to infer dominant successful themes
+#### Slide 2 (Second Priority Issue)
+- Shows the second most critical insight
+- Includes specific loss metrics and recovery potential
+- Example: "Losing 50k Views Monthly" with algorithm change context
+- No video thumbnails - text-only like Slide 1
 
-#### Slide 3 (Underperformer Analysis)
-- Left: 250px video card showing worst performer by viewsPerDay
-- Right: Neria diagnosis using system prompt `collection_losers_theme`
-- Lazy loads single worst video via `/api/collection/losers`
-- Timer pauses during loading, starts after animation completes
+#### Slide 3 (Third Priority Issue)
+- Presents the third priority insight
+- Focuses on actionable improvements with clear metrics
+- Example: "Videos Too Short for Algorithm" with specific duration recommendations
+- Text-only presentation
 
-#### Slide 4 (Billing Gate)
+#### Slide 4 (Growth Potential Summary)
+- Shows channel operating at only 32-45% of potential (inverted health score)
+- Emphasizes the 55-68% growth opportunity available
+- Creates urgency: "You're leaving X% of views, subscribers, and revenue on the table"
+- Teases biggest opportunity without revealing full solution
+
+#### Slide 5 (What You'll Unlock)
+- Grid of 4 specific value propositions with emojis
+- 🎯 Your 7 Viral Short Moments (exact timestamps)
+- 📊 Algorithm Recovery Plan (3 proven strategies)
+- 🔍 Competitor Blind Spots (5 untapped topics)
+- 💡 AI Script Generator (based on top performers)
+- Includes social proof: "Join 1,247 creators already growing"
+- Urgency element: "⚠️ This analysis expires in 24 hours"
+- No auto-advance - lets user read and absorb
+
+#### Slide 6 (Billing Gate)
 - Checks subscription status via `/api/billing/status`
 - If active subscription exists: redirects to `/dashboard`
 - If no subscription: shows `BillingModal` with Stripe Elements integration
@@ -212,8 +229,11 @@ This context document should guide all development decisions and ensure consiste
 - Admin users see "Grant free" bypass link for development
 
 ### API Endpoints
-- `/api/collection/preview`: Main data bundle (channel + analytics + winners + slide text)
-- `/api/collection/losers`: Lazy load worst performer details for Slide 3
+- `/api/collection/preview`: Main data bundle (channel + analytics + insights + slide text)
+  - Supports `?testing=true` parameter to enable testing mode with all 15 insights
+  - Integrates insights analyzer for prioritized problem identification
+  - Returns growth potential scores alongside health scores
+- `/api/collection/losers`: Lazy load worst performer details (deprecated in new flow)
 - `/api/billing/status`: Check subscription status and admin flag for channel
 - `/api/billing/create-subscription`: Create Stripe subscription with payment confirmation
 - `/api/billing/webhook`: Handle Stripe webhook events (subscription lifecycle)
@@ -227,8 +247,73 @@ This context document should guide all development decisions and ensure consiste
 
 ### Key Components/State
 - Uses `NeriaResponse` for animated text with batching and punctuation-aware delays
-- Local state: `activeSlide`, `slide1Done`, `slide2Done`, `slide3Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`
-- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`, `SLIDE_COUNT=4`
+- Local state: `activeSlide`, `slide1Done` through `slide5Done`, `metaAnim`, `pauseTimer`, `userInteractedAt`
+- Constants: `DEFAULT_SLIDE_DURATION_MS=9000`, `SLIDE1_BUFFER_MS=5000`
+- Dynamic slide count: 6 slides in normal mode, variable in testing mode
+
+## Feature: Insights Analyzer & Prioritization Engine
+
+### Overview
+- File: `src/utils/insights-analyzer.ts`
+- Purpose: Analyze YouTube channel data to identify and prioritize growth opportunities
+- Conversion-focused: Designed to drive paid subscriptions by showing specific, quantified problems
+
+### Architecture
+- **Prioritization Engine**: Scores insights based on Impact (70%) + Actionability (30%)
+- **15 Insight Types**: From poor retention to missed Shorts opportunities
+- **Data-Driven**: Uses actual YouTube Analytics API data with full traceability
+- **Growth Potential Scoring**: Inverts health scores to emphasize opportunity (55-68% growth potential vs 94% health)
+
+### Insight Types
+1. **low_ctr**: Click-through rate optimization
+2. **poor_retention**: Overall retention problems
+3. **weak_intros**: First 30-second drop-offs
+4. **inconsistent_uploads**: Posting schedule issues
+5. **low_subscriber_conversion**: Views not converting to subs
+6. **low_engagement_rate**: Poor likes/comments ratio
+7. **declining_performance**: Recent view drops with algorithm context
+8. **missed_shorts_opportunity**: Quantified Shorts potential (e.g., "Missing ~3.5M Monthly Views")
+9. **suboptimal_video_length**: Too short/long for algorithm
+10. **underperforming_thumbnails**: Visual consistency issues
+11. **poor_title_optimization**: Missing psychological triggers
+12. **poor_audience_retention**: Specific retention patterns
+13. **low_watch_time**: Total watch time optimization
+14. **geographic_opportunity**: Untapped markets
+15. **seasonal_timing_issues**: Upload timing optimization
+
+### Scoring System
+- **Impact Score**: 1-10 scale for growth funnel effect
+- **Actionability Score**: 1-10 scale for ease of fixing
+- **Priority Score**: `(Impact × 0.7) + (Actionability × 0.3)`
+- **Confidence**: 0-1 scale for data reliability
+
+### Key Features
+- **Specific Metrics**: Shows exact numbers (lost views, revenue impact, recovery time)
+- **Teaser Content**: Partial reveals that require full platform access
+- **Algorithm Context**: References November 2024 algorithm changes affecting creators
+- **Median vs Mean**: Uses median for video length to handle outliers
+- **Human-Friendly Language**: Supportive tone with actionable next steps
+
+### Testing Mode
+- Access via `?testing=true` query parameter
+- Displays all 15 insight types for evaluation
+- Shows YouTube Analytics data sources for each insight
+- Includes raw data JSON for transparency
+- Disables auto-advance for thorough review
+- Yellow "TESTING MODE" indicator in UI
+
+### Data Sources Integration
+Each insight includes:
+- `dataSources[]`: List of YouTube Analytics API endpoints used
+- `rawData`: Actual channel data that triggered the insight
+- Full traceability from API → Analysis → Recommendation
+
+### Conversion Psychology
+- **Loss Aversion**: "Losing 50k views monthly" vs generic problems
+- **FOMO Elements**: "73% of creators like you affected"
+- **Specific Teasers**: "7 exact timestamps" instead of vague promises
+- **Urgency**: "Analysis expires in 24 hours"
+- **Social Proof**: "Join 1,247 creators already growing"
 
 ## Feature: Billing Integration (Stripe)
 

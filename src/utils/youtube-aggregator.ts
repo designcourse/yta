@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from '@/utils/supabase/admin';
 import { COLLECTION_SAMPLE_SIZE, COLLECTION_TTL_HOURS } from '@/utils/config';
 import { NeriaInput } from '@/utils/types/neria';
+import { determineLengthBand } from '@/utils/baselines';
 
 type AggregateParams = {
   userId: string;
@@ -73,10 +74,13 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
       const createdAt = cached.created_at ? new Date(cached.created_at) : null;
       if (createdAt && Date.now() - createdAt.getTime() < COLLECTION_TTL_HOURS * 3600 * 1000) {
         if (cached.payload_json && cached.winners_json && cached.losers_json) {
+          const payload = cached.payload_json as NeriaInput;
+          const lifetimeFromPayload = Number(payload?.rollups?.metrics?.views ?? 0);
           return {
-            neriaInput: cached.payload_json as NeriaInput,
+            neriaInput: payload,
             winners: cached.winners_json as WinnerCard[],
             losers: cached.losers_json as LoserCard[],
+            lifetimeViews: lifetimeFromPayload,
           };
         }
       }
@@ -344,6 +348,40 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
       winners_json: winners,
       losers_json: losers,
     }, { onConflict: 'user_id,channel_id' });
+  } catch {}
+
+  // Persist per-video daily metrics snapshot
+  try {
+    const today = new Date();
+    const rows = neriaInput.recentUploads.map((v) => {
+      const daysSince = Math.max(1, Math.min(90, daysDiff(v.publishedAt, today)));
+      const viewsPerDay = v.views / daysSince;
+      return {
+        user_id: userId,
+        channel_id: channelId,
+        video_id: v.id,
+        date: today.toISOString().slice(0, 10),
+        published_at: v.publishedAt || null,
+        is_short: v.isShort,
+        length_sec: v.durationSec,
+        length_band: determineLengthBand(v.durationSec, v.isShort),
+        topic_cluster: null,
+        views: v.views,
+        views_per_day: Math.round(viewsPerDay * 100) / 100,
+        avg_view_duration_sec: v.avgViewDurationSec,
+        avg_view_pct: v.avgViewPct,
+        impressions: null,
+        ctr: null,
+        vph_24h: null,
+        wtpi_24h: null,
+        svr_24h: null,
+      };
+    });
+    if (rows.length > 0) {
+      await admin
+        .from('video_metrics')
+        .upsert(rows, { onConflict: 'channel_id,video_id,date' });
+    }
   } catch {}
 
   return { neriaInput, winners, losers, lifetimeViews: totalViews };

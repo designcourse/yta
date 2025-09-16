@@ -1,0 +1,168 @@
+---
+alwaysApply: true
+description: Neria coaching system plan — baselines, KPIs, guardrails, and prioritized /dashboard implementation roadmap
+---
+
+# Neria Coaching System — Baselines, KPIs, Guardrails, and /dashboard Roadmap
+
+## Purpose
+- Establish a deterministic analytics core that defines success and learning baselines per upload.
+- Constrain LLMs to interpret, coach, and propose next experiments based on provided numbers only.
+- Prioritize /dashboard features that deliver ongoing, compounding value to creators.
+
+## North Star and Stages
+- North star: sustainable watch-time growth (views × average view duration).
+- Stages:
+  - Spark: maximize CTR and first-30s retention for new/small channels.
+  - Lift: stabilize discovery via watch time per impression (WTPI) and 24h velocity.
+  - Scale: compound retention, returning viewers, subs per view.
+
+## Comparable Baselines (creator-specific)
+- Compare new uploads only to the creator’s last N “similar” videos:
+  - Format: Long vs Shorts vs Live.
+  - Topic cluster: embeddings of title/description.
+  - Length band: e.g., 6–9 min, 9–13 min.
+  - Traffic source mix: Search-leaning vs Suggested/Home.
+- Robust stats: rolling median and IQR (25th–75th).
+- Success thresholds:
+  - Win: beats `median + 0.5*IQR` in ≥2 of 3 target KPIs (CTR_24h, AVD_24h, VPH_24h).
+  - Learning win: if a single lever was targeted, require improvement on that lever only.
+  - Neutral/Loss: below `median - 0.5*IQR` on target KPI.
+
+## KPI Definitions (normalize for time)
+- CTR_t: click-through rate at window t.
+- AVD_t: average view duration at window t.
+- VPH_t: views per hour since publish at window t.
+- WTPI_t: watch time per impression at window t.
+- SVR_t: subs gained per 1k views at window t.
+- Windows: T+1h (early), T+24h (verdict), T+7d (stickiness).
+
+## Experiment Levers + Decisioning
+- CTR lever: packaging (title/thumbnail/promise). Pass criteria: CTR_24h up, no AVD penalty.
+- Retention lever: hook/pacing/structure. Pass: AVD_24h up, first-30s drop improves.
+- Topic lever: audience fit/intent. Pass: WTPI_24h up, impressions growth without CTR collapse.
+- Format lever: length band, Shorts cadence. Pass varies by format.
+
+## Evaluation Windows
+- T+1h: VPH_1h vs comparable baseline, early CTR rescue if < P25.
+- T+24h: verdict on target lever (CTR/AVD/WTPI), traffic source mix sanity.
+- T+7d: watch-time total, returning viewers, subs gained; update baselines + hypothesis bank.
+
+## Analytics vs LLM Responsibilities
+- Analytics: compute metrics, baselines, verdicts, confidence, and trends deterministically.
+- LLMs ([src/utils/neria-openai.ts](mdc:src/utils/neria-openai.ts), [src/utils/neria-gemini.ts](mdc:src/utils/neria-gemini.ts)):
+  - Translate numbers into one focused recommendation and “next experiment.”
+  - Generate packaging alternates and script outline fixes grounded in provided metrics.
+  - Guardrail: never invent metrics; only reason over supplied data.
+
+## Competitor Intelligence (cold-start priors)
+- Allowed (public): cadence, publish times, format mix, durations, titles, thumbnails, view counts, relative performance within their last N (normalize by days since publish).
+- Not allowed (private): CTR, impressions, retention curves.
+- Benchmarks: per-topic “hit rate,” relative velocity, packaging patterns (title length, numbers, faces/contrast/text count).
+- Use for priors when creator sample size is small; replace with creator baselines as data grows.
+
+---
+
+## /dashboard Implementation Roadmap (Prioritized Checklist)
+Legend: [ ] planned  [ ] in progress  [ ] QA  [ ] done
+
+1) Baseline Engine and Comparable Sets
+- [ ] [src/utils/insights-analyzer.ts](mdc:src/utils/insights-analyzer.ts): add comparable-set selection (format/topic/length/traffic mix).
+- [ ] Compute rolling median + IQR for CTR_24h, AVD_24h, VPH_24h, WTPI_24h, SVR_24h per comparable set.
+- [ ] Persist daily snapshots (proposed tables): `video_metrics`, `comparable_baselines`.
+- [ ] API: [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts) returns metrics, baselines, thresholds, confidence.
+
+Acceptance:
+- Returns baselines for each lever and a success verdict per video at T+24h with confidence.
+
+2) Latest Video Analyzer (T+1h, T+24h)
+- [ ] Page: [src/app/dashboard/[channelId]/latest-video/page.tsx](mdc:src/app/dashboard/[channelId]/latest-video/page.tsx) renders early and 24h KPIs vs baselines.
+- [ ] Shows rescue prompt if early CTR < P25 at T+1h with safe title/thumbnail guidance.
+- [ ] API: [src/app/api/dashboard/video/[videoId]/analysis/route.ts](mdc:src/app/api/dashboard/video/[videoId]/analysis/route.ts) integrates YT Analytics for windows.
+
+Acceptance:
+- Renders early and 24h verdicts; displays actionable rescue only when thresholds trigger.
+
+3) Coaching Action + Next Experiment
+- [ ] Component: [src/components/NeriaContainer.tsx](mdc:src/components/NeriaContainer.tsx) exposes a “Next Experiment” panel.
+- [ ] LLM prompt grounding: pass KPIs, baselines, verdict, and lever decision; 1 primary recommendation.
+- [ ] Persist experiments (proposed table): `experiments` with target lever, hypothesis, outcome.
+
+Acceptance:
+- Exactly one primary experiment recommended per upload, stored with verdict for later review.
+
+4) Hypothesis Backlog and Outcomes
+- [ ] Page: [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx) adds a backlog section filtered by lever.
+- [ ] API: [src/app/api/experiments](mdc:src/app/api/experiments) CRUD for hypotheses, linkage to uploads, outcomes auto-filled at T+24h/7d.
+- [ ] Trend widget: win rate by lever over last 10 uploads.
+
+Acceptance:
+- Backlog items auto-resolved with outcomes; lever win rates visible.
+
+5) “My Goals” Weights (existing page)
+- [ ] Page: [src/app/dashboard/[channelId]/my-goals/page.tsx](mdc:src/app/dashboard/[channelId]/my-goals/page.tsx) to store weights for Growth/Monetization/Community/Shorts.
+- [ ] Weights shift KPI importance and success thresholds (e.g., emphasize WTPI or SVR).
+- [ ] Persist in `channel_strategy` or new `goals` table.
+
+Acceptance:
+- Changing weights visibly shifts “pass/fail” thresholds and experiment priority.
+
+6) Competitors Page
+- [ ] Page: [src/app/dashboard/[channelId]/competitors/page.tsx](mdc:src/app/dashboard/[channelId]/competitors/page.tsx) for managing competitor channels.
+- [ ] API: [src/app/api/competitors](mdc:src/app/api/competitors) resolve channels, fetch public stats, compute topic hit rates and velocity.
+- [ ] Use as priors when creator sample size is small; annotate insights with “prior-based” confidence.
+
+Acceptance:
+- Topic opportunities list shows relative overperformance; priors applied only for thin data.
+
+7) Trendlines and Health
+- [ ] Widgets on [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx): WTPI trend, AVD trend, VPH_24h trend across last 10 uploads.
+- [ ] “Win rate vs comparable” summary by topic cluster and length band.
+
+Acceptance:
+- Trends and win rates render without flakiness; topic/length filters work.
+
+8) Notifications and Rescue Flow
+- [ ] Server-side checks at T+1h (Supabase cron) to trigger rescue notifications when thresholds fail.
+- [ ] Client toast/modal in dashboard; deep link to “Next Experiment.”
+
+Acceptance:
+- Notifications fire only when criteria met; no duplicates; respect reduced-motion/accessibility.
+
+9) Guardrails, Logging, and Testing
+- [ ] Guardrails: LLM cannot fabricate competitor private metrics; all insights cite their source.
+- [ ] Logging: store model inputs/outputs and analytics snapshots for traceability (PII-safe).
+- [ ] E2E: extend [tests/e2e/dashboard/neria-chat.spec.ts](mdc:tests/e2e/dashboard/neria-chat.spec.ts) to cover “Next Experiment” presence and KPI rendering.
+
+Acceptance:
+- Passing E2E confirms numbers on screen match API responses; model outputs are grounded.
+
+---
+
+## Data and APIs (Proposed)
+- Tables (additive, with RLS): `video_metrics`, `comparable_baselines`, `experiments`, `goals` (or reuse `channel_strategy`), `competitors`.
+- APIs:
+  - `GET /api/dashboard/kpis` → baselines, thresholds, verdicts.
+  - `GET /api/dashboard/video/:id/analysis` → T+1h/24h/7d KPIs.
+  - `POST /api/experiments` / `PATCH /api/experiments/:id` → backlog + outcomes.
+  - `GET/POST /api/goals` → goal weights.
+  - `GET/POST /api/competitors` → competitor set, public stats.
+
+## Prompting and Grounding
+- Only pass numerics and facts from APIs; include confidence and window (T+1h/24h/7d).
+- LLM output limited to: 1) verdict explanation (2–3 sentences), 2) next experiment with concrete steps, 3) 2–3 alternates (titles or hook fixes) if lever == CTR/retention.
+
+## UX Notes
+- Show confidence badges (low/med/high) based on sample size, variance, recency.
+- One primary experiment per upload to reduce confounds.
+- Respect reduced-motion; avoid auto-animated charts for accessibility.
+
+References:
+- [src/utils/insights-analyzer.ts](mdc:src/utils/insights-analyzer.ts)
+- [src/app/dashboard/[channelId]/latest-video/page.tsx](mdc:src/app/dashboard/[channelId]/latest-video/page.tsx)
+- [src/components/NeriaContainer.tsx](mdc:src/components/NeriaContainer.tsx)
+- [src/app/dashboard/[channelId]/my-goals/page.tsx](mdc:src/app/dashboard/[channelId]/my-goals/page.tsx)
+- [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx)
+- [src/utils/neria-openai.ts](mdc:src/utils/neria-openai.ts)
+- [tests/e2e/dashboard/neria-chat.spec.ts](mdc:tests/e2e/dashboard/neria-chat.spec.ts)
+

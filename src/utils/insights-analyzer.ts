@@ -28,6 +28,8 @@ export type Insight = {
   evidence: string[];
   actions: string[];
   confidence: number; // 0-1 scale
+  dataSources?: string[]; // YouTube Analytics data points used
+  rawData?: any; // Actual YouTube API data used for this insight
 };
 
 export type InsightsAnalysis = {
@@ -75,7 +77,7 @@ function daysDiff(fromISO: string, to = new Date()): number {
   return Math.max(0, Math.floor(diff / (24 * 3600 * 1000)));
 }
 
-export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<InsightsAnalysis> {
+export async function analyzeChannelInsights(neriaInput: NeriaInput, testingMode = false): Promise<InsightsAnalysis> {
   const insights: Insight[] = [];
   const { channel, recentUploads, rollups, cadence } = neriaInput;
 
@@ -118,7 +120,31 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'Add a "what you\'ll learn" preview in the first 10 seconds',
         'Test different opening formats across your next 3 videos'
       ],
-      confidence: 0.9
+      confidence: 0.9,
+      dataSources: [
+        'rollups.metrics.avgViewPct (average view percentage across all videos)',
+        'recentUploads[].avgViewPct (individual video retention rates)',
+        'YouTube Analytics API: reports.query() with metrics=averageViewPercentage'
+      ],
+      rawData: {
+        channelAvgRetention: channelAvgRetention,
+        rollups: {
+          metrics: {
+            avgViewPct: rollups.metrics.avgViewPct
+          }
+        },
+        worstVideos: worstVideos.map(v => ({
+          title: v.title,
+          avgViewPct: v.avgViewPct,
+          views: v.views,
+          publishedAt: v.publishedAt
+        })),
+        benchmarks: {
+          POOR_RETENTION: BENCHMARKS.POOR_RETENTION,
+          AVG_RETENTION: BENCHMARKS.AVG_RETENTION,
+          GOOD_RETENTION: BENCHMARKS.GOOD_RETENTION
+        }
+      }
     });
   }
 
@@ -146,7 +172,26 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'Promise a specific outcome within 10 seconds',
         'Remove lengthy introductions and channel branding'
       ],
-      confidence: 0.85
+      confidence: 0.85,
+      dataSources: [
+        'recentUploads[].avgViewPct (filtered for videos <30% retention)',
+        'rollups.metrics.avgViewPct (channel average for comparison)',
+        'YouTube Analytics API: reports.query() with metrics=averageViewPercentage',
+        'Calculated: videosWithPoorEarlyRetention.length (count of underperforming videos)'
+      ],
+      rawData: {
+        channelAvgRetention: channelAvgRetention,
+        totalVideos: recentUploads.length,
+        videosWithPoorEarlyRetention: videosWithPoorEarlyRetention.map(v => ({
+          title: v.title,
+          avgViewPct: v.avgViewPct,
+          views: v.views,
+          publishedAt: v.publishedAt,
+          durationSec: v.durationSec
+        })),
+        retentionThreshold: 0.3,
+        calculatedEarlyDropOff: ((1 - channelAvgRetention) * 100).toFixed(0)
+      }
     });
   }
 
@@ -177,7 +222,32 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'Use YouTube Shorts to maintain presence between long-form videos',
         'Create a content calendar for next 30 days'
       ],
-      confidence: 0.8
+      confidence: 0.8,
+      dataSources: [
+        'recentUploads[].publishedAt (video publish dates)',
+        'cadence.per30d (uploads in last 30 days)',
+        'cadence.per90d (uploads in last 90 days)', 
+        'Calculated: daysDiff(publishedAt) for each video',
+        'YouTube Data API: search.list() with channelId and publishedAfter'
+      ],
+      rawData: {
+        daysSinceLastUpload: daysSinceLastUpload,
+        cadence: {
+          per30d: cadence.per30d,
+          per90d: cadence.per90d
+        },
+        recentUploads: recentUploads.map(v => ({
+          title: v.title,
+          publishedAt: v.publishedAt,
+          daysSincePublished: daysDiff(v.publishedAt),
+          views: v.views
+        })).sort((a, b) => a.daysSincePublished - b.daysSincePublished),
+        benchmarks: {
+          CONSISTENT_UPLOAD_DAYS: BENCHMARKS.CONSISTENT_UPLOAD_DAYS,
+          weeklyUploadsTarget: 4
+        },
+        isInconsistent: isInconsistent
+      }
     });
   }
 
@@ -205,7 +275,39 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'End videos with a preview of your next upload',
         'Build stronger personal connection with your audience'
       ],
-      confidence: 0.75
+      confidence: 0.75,
+      dataSources: [
+        'rollups.metrics.views (total views in 90-day period)',
+        'rollups.metrics.subsNet (net subscriber change in 90 days)',
+        'YouTube Analytics API: reports.query() with metrics=views,subscribersGained',
+        'Calculated: subConversionRate = subsGained90d / totalViews90d',
+        'Aggregated from youtube-aggregator.ts via YouTube Analytics API'
+      ],
+      rawData: {
+        totalViews90d: totalViews90d,
+        subsGained90d: subsGained90d,
+        subConversionRate: subConversionRate,
+        subConversionRatePercent: (subConversionRate * 100).toFixed(3),
+        rollups: {
+          metrics: {
+            views: rollups.metrics.views,
+            subsNet: rollups.metrics.subsNet
+          }
+        },
+        benchmarks: {
+          POOR_SUB_CONVERSION: BENCHMARKS.POOR_SUB_CONVERSION,
+          AVG_SUB_CONVERSION: BENCHMARKS.AVG_SUB_CONVERSION,
+          GOOD_SUB_CONVERSION: BENCHMARKS.GOOD_SUB_CONVERSION
+        },
+        topPerformingVideos: recentUploads
+          .sort((a, b) => b.views - a.views)
+          .slice(0, 5)
+          .map(v => ({
+            title: v.title,
+            views: v.views,
+            publishedAt: v.publishedAt
+          }))
+      }
     });
   }
 
@@ -229,7 +331,32 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'Respond to every comment in the first hour',
         'Use polls and community posts to boost engagement'
       ],
-      confidence: 0.7
+      confidence: 0.7,
+      dataSources: [
+        'recentUploads[].likes (like counts from individual videos)',
+        'recentUploads[].views (view counts from individual videos)',
+        'Calculated: avgEngagementRate = likes / views averaged across videos',
+        'YouTube Data API: videos.list() with part=statistics',
+        'Filtered: videosWithLikes (excludes videos with 0 likes)'
+      ],
+      rawData: {
+        avgEngagementRate: avgEngagementRate,
+        avgEngagementRatePercent: (avgEngagementRate * 100).toFixed(3),
+        videosWithLikes: videosWithLikes.map(v => ({
+          title: v.title,
+          likes: v.likes,
+          views: v.views,
+          engagementRate: (v.likes / Math.max(v.views, 1)).toFixed(4),
+          publishedAt: v.publishedAt
+        })),
+        totalVideosAnalyzed: videosWithLikes.length,
+        totalVideosInDataset: recentUploads.length,
+        benchmarks: {
+          POOR_ENGAGEMENT_RATE: BENCHMARKS.POOR_ENGAGEMENT_RATE,
+          AVG_ENGAGEMENT_RATE: BENCHMARKS.AVG_ENGAGEMENT_RATE,
+          GOOD_ENGAGEMENT_RATE: BENCHMARKS.GOOD_ENGAGEMENT_RATE
+        }
+      }
     });
   }
 
@@ -265,7 +392,36 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
           'Access algorithm change recovery toolkit',
           'View similar channels that bounced back'
         ],
-        confidence: 0.8
+        confidence: 0.8,
+        dataSources: [
+          'recentUploads[].views (filtered by publishedAt for recent vs older)',
+          'recentUploads[].publishedAt (to segment videos by time period)',
+          'Calculated: recentVideos (last 30 days) vs olderVideos (30-90 days ago)',
+          'Calculated: performanceDecline = (olderAvgViews - recentAvgViews) / olderAvgViews',
+          'YouTube Data API: videos.list() with part=statistics,snippet'
+        ],
+        rawData: {
+          performanceDecline: performanceDecline,
+          performanceDeclinePercent: (performanceDecline * 100).toFixed(1),
+          recentVideos: recentVideos.map(v => ({
+            title: v.title,
+            views: v.views,
+            publishedAt: v.publishedAt,
+            daysSincePublished: daysDiff(v.publishedAt)
+          })),
+          olderVideos: olderVideos.map(v => ({
+            title: v.title,
+            views: v.views,
+            publishedAt: v.publishedAt,
+            daysSincePublished: daysDiff(v.publishedAt)
+          })),
+          recentAvgViews: Math.round(recentAvgViews),
+          olderAvgViews: Math.round(olderAvgViews),
+          lostViews: lostViews,
+          monthlyLoss: monthlyLoss,
+          estimatedRevenueLoss: estimatedRevenueLoss,
+          analysisThreshold: 0.3
+        }
       });
     }
   }
@@ -301,7 +457,35 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'View competitor Shorts analysis',
         'Access Shorts scheduling calendar'
       ],
-      confidence: 0.9
+      confidence: 0.9,
+      dataSources: [
+        'recentUploads[].isShort (boolean indicating if video is a Short)',
+        'recentUploads[].durationSec (to identify Shorts <60 seconds)',
+        'Calculated: shortsCount vs longFormCount ratio',
+        'YouTube Data API: videos.list() with part=contentDetails',
+        'Estimated metrics based on industry averages for Shorts performance'
+      ],
+      rawData: {
+        shortsCount: shortsCount,
+        longFormCount: longFormCount,
+        shortsRatio: (shortsCount / Math.max(longFormCount, 1)).toFixed(2),
+        targetShortsRatio: 0.3,
+        recentUploads: recentUploads.map(v => ({
+          title: v.title,
+          isShort: v.isShort,
+          durationSec: v.durationSec,
+          views: v.views,
+          publishedAt: v.publishedAt
+        })),
+        estimatedShortsViews: estimatedShortsViews,
+        estimatedNewSubs: estimatedNewSubs,
+        shortsMessage: shortsMessage,
+        industryAverages: {
+          shortsPerLongForm: 2,
+          avgShortsViews: 50000,
+          shortsSubConversion: 0.001
+        }
+      }
     });
   }
 
@@ -349,8 +533,43 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
         'Focus on one main topic per video',
         'Use tighter editing and faster pacing'
       ],
-      confidence: 0.75
+      confidence: 0.75,
+      dataSources: [
+        'recentUploads[].durationSec (video duration in seconds)',
+        'Calculated: sortedDurations (median calculation to avoid outliers)',
+        'Calculated: medianVideoDuration vs avgVideoDuration comparison',
+        'YouTube Data API: videos.list() with part=contentDetails',
+        'rollups.metrics.avgViewPct (retention rate for length optimization)'
+      ],
+      rawData: {
+        medianVideoDuration: medianVideoDuration,
+        avgVideoDuration: avgVideoDuration,
+        medianLengthMinutes: Math.round(medianVideoDuration / 60),
+        avgLengthMinutes: Math.round(avgVideoDuration / 60),
+        analysisLength: analysisLength,
+        issueTooShort: issueTooShort,
+        sortedDurations: sortedDurations,
+        videoLengths: recentUploads.map(v => ({
+          title: v.title,
+          durationSec: v.durationSec,
+          durationMinutes: Math.round(v.durationSec / 60),
+          views: v.views,
+          avgViewPct: v.avgViewPct,
+          publishedAt: v.publishedAt
+        })).sort((a, b) => a.durationSec - b.durationSec),
+        lengthThresholds: {
+          tooShort: 180, // 3 minutes
+          tooLong: 1200, // 20 minutes
+          optimal: { min: 8 * 60, max: 15 * 60 }
+        },
+        channelAvgRetention: channelAvgRetention
+      }
     });
+  }
+
+  // In testing mode, generate all 15 insight types for evaluation
+  if (testingMode) {
+    insights.push(...generateAllInsightTypesForTesting(neriaInput, channelAvgViews, channelAvgRetention, avgEngagementRate, subConversionRate, cadence));
   }
 
   // Sort insights by priority score
@@ -374,7 +593,7 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
   const growthRoomPotential = 100 - growthHealth;
 
   return {
-    topInsights: insights.slice(0, 3), // Top 3 most critical issues
+    topInsights: testingMode ? insights : insights.slice(0, 3), // In testing mode, return all insights
     allInsights: insights,
     channelHealth: {
       overall: Math.round(Math.max(20, Math.min(45, overallHealth))), // Cap at 45% to always show room for improvement
@@ -389,5 +608,344 @@ export async function analyzeChannelInsights(neriaInput: NeriaInput): Promise<In
       growth: Math.round(growthRoomPotential)
     }
   };
+}
+
+function generateAllInsightTypesForTesting(
+  neriaInput: NeriaInput,
+  channelAvgViews: number,
+  channelAvgRetention: number,
+  avgEngagementRate: number,
+  subConversionRate: number,
+  cadence: any
+): Insight[] {
+  const testingInsights: Insight[] = [];
+  const { channel, recentUploads, rollups } = neriaInput;
+
+  // 1. Low CTR
+  testingInsights.push({
+    type: 'low_ctr',
+    title: 'Low Click-Through Rate',
+    description: 'Your thumbnails and titles aren\'t compelling enough to get clicks. CTR directly impacts how YouTube promotes your content.',
+    impact: 8,
+    actionability: 9,
+    priority: calculatePriorityScore(8, 9),
+    evidence: [
+      'Estimated CTR: 2.1% (Industry avg: 4-7%)',
+      'Thumbnail consistency issues detected',
+      'Title optimization opportunities found'
+    ],
+    actions: [
+      'A/B test 3 different thumbnail styles',
+      'Use outcome-focused titles with numbers',
+      'Add emotional triggers to thumbnails',
+      'Test bright vs dark thumbnail backgrounds'
+    ],
+    confidence: 0.8,
+      dataSources: [
+        'recentUploads[].impressions (how many times thumbnail was shown)',
+        'recentUploads[].views (actual clicks on videos)',
+        'Calculated: CTR = views / impressions for each video',
+        'YouTube Analytics API: reports.query() with metrics=impressions,views',
+        'Note: CTR data requires YouTube Analytics API access'
+      ],
+      rawData: {
+        estimatedCTR: 0.021,
+        sampleVideos: recentUploads.slice(0, 5).map(v => ({
+          title: v.title,
+          views: v.views,
+          estimatedImpressions: Math.round(v.views / 0.021), // Reverse calculate impressions
+          estimatedCTR: '2.1%',
+          publishedAt: v.publishedAt
+        })),
+        benchmarkCTR: {
+          poor: '2%',
+          average: '4%',
+          good: '7%'
+        },
+        note: 'CTR data estimated - requires YouTube Analytics API for actual impressions'
+      }
+  });
+
+  // 2. Underperforming Thumbnails
+  testingInsights.push({
+    type: 'underperforming_thumbnails',
+    title: 'Thumbnail Performance Issues',
+    description: 'Your thumbnails lack visual consistency and click-worthiness. Strong thumbnails can double your CTR overnight.',
+    impact: 7,
+    actionability: 9,
+    priority: calculatePriorityScore(7, 9),
+    evidence: [
+      'Inconsistent thumbnail style across videos',
+      'Low contrast text readability',
+      'Missing emotional expressions in thumbnails'
+    ],
+    actions: [
+      'Create a consistent thumbnail template',
+      'Use high-contrast text and backgrounds',
+      'Include expressive faces in every thumbnail',
+      'Test thumbnails with mobile preview'
+    ],
+    confidence: 0.85,
+    dataSources: [
+      'recentUploads[].thumb (thumbnail URLs for analysis)',
+      'recentUploads[].views (performance correlation with thumbnails)',
+      'Visual analysis: thumbnail consistency, contrast, faces',
+      'YouTube Data API: videos.list() with part=snippet (thumbnails)',
+      'Note: Visual thumbnail analysis requires image processing'
+    ],
+    rawData: {
+      thumbnailAnalysis: recentUploads.slice(0, 5).map(v => ({
+        title: v.title,
+        thumbnailUrl: v.thumb,
+        views: v.views,
+        publishedAt: v.publishedAt,
+        estimatedClickability: 'Medium' // Would be calculated via image analysis
+      })),
+      consistencyIssues: [
+        'Mixed color schemes across thumbnails',
+        'Inconsistent text placement and sizing',
+        'Varying emotional expressions'
+      ],
+      note: 'Thumbnail analysis requires computer vision processing'
+    }
+  });
+
+  // 3. Poor Title Optimization
+  testingInsights.push({
+    type: 'poor_title_optimization',
+    title: 'Title Strategy Needs Work',
+    description: 'Your titles don\'t leverage psychological triggers that drive clicks. Small title changes can increase CTR by 30-50%.',
+    impact: 7,
+    actionability: 8,
+    priority: calculatePriorityScore(7, 8),
+    evidence: [
+      'Average title length: 45 characters (optimal: 60-70)',
+      'Missing power words and emotional triggers',
+      'No clear value proposition in titles'
+    ],
+    actions: [
+      'Use numbers and specific outcomes in titles',
+      'Add urgency words like "Before It\'s Too Late"',
+      'Test question-based vs statement titles',
+      'Include benefit-driven keywords'
+    ],
+    confidence: 0.75,
+    dataSources: [
+      'recentUploads[].title (video titles for analysis)',
+      'recentUploads[].views (performance correlation with titles)',
+      'Calculated: title length, keyword density, emotional triggers',
+      'YouTube Data API: videos.list() with part=snippet',
+      'Text analysis: title structure, power words, specificity'
+    ],
+    rawData: {
+      titleAnalysis: recentUploads.slice(0, 5).map(v => ({
+        title: v.title,
+        titleLength: v.title.length,
+        hasNumbers: /\d/.test(v.title),
+        hasQuestionMark: v.title.includes('?'),
+        views: v.views,
+        publishedAt: v.publishedAt,
+        estimatedOptimization: v.title.length > 60 ? 'Good' : 'Needs improvement'
+      })),
+      averageTitleLength: Math.round(recentUploads.reduce((sum, v) => sum + v.title.length, 0) / recentUploads.length),
+      optimalRange: '60-70 characters',
+      powerWords: ['Ultimate', 'Secret', 'Proven', 'Shocking'],
+      note: 'Title optimization based on length and structure analysis'
+    }
+  });
+
+  // 4. Poor Audience Retention (different from overall retention)
+  testingInsights.push({
+    type: 'poor_audience_retention',
+    title: 'Audience Retention Patterns',
+    description: 'Specific segments of your videos are causing viewer drop-offs. Identifying these patterns can boost overall retention.',
+    impact: 8,
+    actionability: 7,
+    priority: calculatePriorityScore(8, 7),
+    evidence: [
+      'Drop-off spikes at 2:30 mark across videos',
+      'Retention dips during explanation segments',
+      'Strong retention during story/example portions'
+    ],
+    actions: [
+      'Cut explanation segments by 30%',
+      'Add more stories and examples',
+      'Use pattern interrupts every 90 seconds',
+      'Analyze retention graphs for each video'
+    ],
+    confidence: 0.7,
+    dataSources: [
+      'rollups.metrics.avgViewPct (audience retention patterns)',
+      'recentUploads[].avgViewPct (individual video retention)',
+      'YouTube Analytics API: reports.query() with metrics=audienceRetentionForPlaybackPositionRelative',
+      'Calculated: retention drop-off points, pattern analysis',
+      'Note: Detailed retention graphs require Analytics API access'
+    ]
+  });
+
+  // 5. Low Watch Time
+  testingInsights.push({
+    type: 'low_watch_time',
+    title: 'Total Watch Time Optimization',
+    description: 'Your watch time per viewer is below optimal levels. This metric heavily influences YouTube\'s algorithm promotion.',
+    impact: 6,
+    actionability: 6,
+    priority: calculatePriorityScore(6, 6),
+    evidence: [
+      `Average watch time: ${Math.round(channelAvgRetention * 600)} seconds`,
+      'Target watch time: 4-6 minutes per video',
+      'Watch time affects algorithm ranking'
+    ],
+    actions: [
+      'Create longer-form content (10-15 minutes)',
+      'Use cliffhangers to maintain engagement',
+      'Break content into chapters for better retention',
+      'Add interactive elements throughout videos'
+    ],
+    confidence: 0.65,
+    dataSources: [
+      'rollups.metrics.avgViewDurationSec (average watch time)',
+      'recentUploads[].durationSec (video length for watch time ratio)',
+      'recentUploads[].views (total views for watch time calculation)',
+      'YouTube Analytics API: reports.query() with metrics=averageViewDuration',
+      'Calculated: watch time per viewer, total watch time metrics'
+    ]
+  });
+
+  // 6. Geographic Opportunity
+  testingInsights.push({
+    type: 'geographic_opportunity',
+    title: 'Untapped Geographic Markets',
+    description: 'You\'re missing significant viewership from key geographic regions. Optimizing for these markets could increase views by 25%.',
+    impact: 5,
+    actionability: 4,
+    priority: calculatePriorityScore(5, 4),
+    evidence: [
+      'Strong performance in US/UK markets',
+      'Underperforming in India, Brazil markets',
+      'Potential 500k+ monthly views from expansion'
+    ],
+    actions: [
+      'Add subtitles in Spanish and Hindi',
+      'Create content relevant to global audiences',
+      'Post at times optimal for international viewers',
+      'Research trending topics in target countries'
+    ],
+    confidence: 0.6,
+    dataSources: [
+      'recentUploads[].views (performance by geographic distribution)',
+      'YouTube Analytics API: reports.query() with dimensions=country',
+      'Channel demographics and audience geography data',
+      'Market analysis: untapped regions with growth potential',
+      'Note: Geographic data requires YouTube Analytics API access'
+    ]
+  });
+
+  // 7. Seasonal Timing Issues
+  testingInsights.push({
+    type: 'seasonal_timing_issues',
+    title: 'Upload Timing Optimization',
+    description: 'Your upload schedule doesn\'t align with when your audience is most active. Better timing could increase initial velocity.',
+    impact: 4,
+    actionability: 8,
+    priority: calculatePriorityScore(4, 8),
+    evidence: [
+      'Currently posting at 2 PM EST',
+      'Audience most active at 7-9 PM EST',
+      'Weekend uploads underperform by 40%'
+    ],
+    actions: [
+      'Shift uploads to 7 PM EST on weekdays',
+      'Avoid Friday/Saturday uploads',
+      'Use YouTube Analytics to find optimal times',
+      'Test different days of the week'
+    ],
+    confidence: 0.8,
+    dataSources: [
+      'recentUploads[].publishedAt (upload timestamps for timing analysis)',
+      'YouTube Analytics API: reports.query() with dimensions=hour,day',
+      'Audience activity patterns and optimal posting times',
+      'Performance correlation with upload timing',
+      'Note: Audience activity data requires Analytics API access'
+    ]
+  });
+
+  // Add sample data for insights that might not trigger with current conditions
+  
+  // 8. Low CTR (if not already added above)
+  if (!testingInsights.some(i => i.type === 'low_ctr')) {
+    testingInsights.push({
+      type: 'low_ctr',
+      title: 'Click-Through Rate Below Benchmark',
+      description: 'Your CTR of 1.8% is significantly below the 4-7% range that successful channels achieve.',
+      impact: 8,
+      actionability: 9,
+      priority: calculatePriorityScore(8, 9),
+      evidence: [
+        'Current CTR: 1.8%',
+        'Industry benchmark: 4-7%',
+        'Potential view increase: 2-3x current performance'
+      ],
+      actions: [
+        'Redesign thumbnails with higher contrast',
+        'Test curiosity-gap titles',
+        'Use faces and emotions in thumbnails',
+        'A/B test title lengths and formats'
+      ],
+      confidence: 0.9,
+      dataSources: [
+        'recentUploads[].impressions (duplicate - same as low_ctr)',
+        'recentUploads[].views (duplicate - same as low_ctr)', 
+        'Calculated: CTR = views / impressions',
+        'YouTube Analytics API: reports.query() with metrics=impressions,views',
+        'Note: This is a duplicate of low_ctr insight for testing purposes'
+      ]
+    });
+  }
+
+  // Add any remaining insight types that weren't covered above
+  const existingTypes = new Set(testingInsights.map(i => i.type));
+  const allTypes: InsightType[] = [
+    'low_ctr', 'poor_retention', 'low_subscriber_conversion', 'inconsistent_uploads',
+    'underperforming_thumbnails', 'weak_intros', 'poor_title_optimization',
+    'low_engagement_rate', 'suboptimal_video_length', 'declining_performance',
+    'missed_shorts_opportunity', 'poor_audience_retention', 'low_watch_time',
+    'geographic_opportunity', 'seasonal_timing_issues'
+  ];
+
+  // Add any missing types with generic data
+  allTypes.forEach(type => {
+    if (!existingTypes.has(type)) {
+      testingInsights.push({
+        type,
+        title: `${type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} Analysis`,
+        description: `This insight analyzes your ${type.replace(/_/g, ' ')} performance against industry benchmarks.`,
+        impact: 5,
+        actionability: 5,
+        priority: calculatePriorityScore(5, 5),
+        evidence: [
+          'Performance metrics analyzed',
+          'Benchmark comparison completed',
+          'Improvement opportunities identified'
+        ],
+        actions: [
+          'Review current strategy',
+          'Implement best practices',
+          'Monitor performance changes',
+          'Test new approaches'
+        ],
+        confidence: 0.5,
+        dataSources: [
+          'Generic placeholder - no specific data source',
+          'This is a fallback insight for testing completeness',
+          'Would use relevant YouTube Analytics metrics when implemented',
+          'Data source depends on specific insight type',
+          'Note: Placeholder insight for testing all 15 types'
+        ]
+      });
+    }
+  });
+
+  return testingInsights;
 }
 

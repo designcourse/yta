@@ -19,6 +19,8 @@ type Insight = {
   evidence: string[];
   actions: string[];
   confidence: number;
+  dataSources?: string[];
+  rawData?: any;
 };
 
 type PreviewPayload = {
@@ -43,7 +45,7 @@ type PreviewPayload = {
   };
 };
 
-const SLIDE_COUNT = 6; // Added insights + unlock slides
+// SLIDE_COUNT will be dynamic based on data
 const DEFAULT_SLIDE_DURATION_MS = 9000;
 const SLIDE1_BUFFER_MS = 5000;
 
@@ -57,6 +59,7 @@ export default function CollectionPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const channelId = searchParams.get('channelId');
+  const testingMode = searchParams.get('testing') === 'true';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +79,10 @@ export default function CollectionPage() {
   // Billing gating
   const [showBilling, setShowBilling] = useState(false);
   const [hasActiveSub, setHasActiveSub] = useState<boolean | null>(null);
+  
+  // Calculate dynamic slide count
+  const visible = !loading && !!data;
+  const slideCount = testingMode ? (data?.slides?.length || 0) : 6;
 
   // Utilities
   const firstSentence = (text: string) => {
@@ -120,7 +127,8 @@ export default function CollectionPage() {
     const fetchPreview = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/collection/preview?channelId=${encodeURIComponent(channelId)}&refresh=1`, { cache: 'no-store' });
+        const testingParam = testingMode ? '&testing=true' : '';
+        const res = await fetch(`/api/collection/preview?channelId=${encodeURIComponent(channelId)}&refresh=1${testingParam}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(await res.text());
         const json: PreviewPayload = await res.json();
         setData(json);
@@ -180,7 +188,7 @@ export default function CollectionPage() {
 
   // Timer bar animation and auto-advance (dynamic for slide 1)
   useEffect(() => {
-    if (!data || prefersReduced) return; // disable auto-advance when reduced motion
+    if (!data || prefersReduced || testingMode) return; // disable auto-advance when reduced motion or in testing mode
     if (pauseTimer) return;
 
     let raf: number | null = null;
@@ -198,7 +206,7 @@ export default function CollectionPage() {
       }
       if (ratio >= 1) {
         if (!lastInteractionWithin3s()) {
-          setActiveSlide((s) => (s + 1) % SLIDE_COUNT);
+          setActiveSlide((s) => (s + 1) % slideCount);
         }
         return; // stop animating; effect will rerun on activeSlide change
       }
@@ -259,16 +267,13 @@ export default function CollectionPage() {
       raf = requestAnimationFrame(animate);
       return () => { if (raf) cancelAnimationFrame(raf); };
     }
-  }, [data, activeSlide, userInteractedAt, pauseTimer, prefersReduced, slide1Done, slide2Done, slide3Done, slide4Done, slide5Done, showBilling]);
+  }, [data, activeSlide, userInteractedAt, pauseTimer, prefersReduced, testingMode, slide1Done, slide2Done, slide3Done, slide4Done, slide5Done, showBilling, slideCount]);
 
   const onDotClick = (index: number) => {
     setUserInteractedAt(Date.now());
     setActiveSlide(index);
     if (progressRef.current) progressRef.current.style.transform = 'scaleX(0)';
   };
-
-
-  const visible = !loading && !!data;
 
   // Trigger metadata entrance animation when content becomes visible
   useEffect(() => {
@@ -293,7 +298,12 @@ export default function CollectionPage() {
           {/* Top: Pagination + Content */}
           <div className="content-stretch flex flex-col gap-12 items-start justify-start relative w-full">
             <div className="flex gap-3 items-center" aria-label="pagination">
-              {Array.from({ length: SLIDE_COUNT }).map((_, i) => (
+              {testingMode && (
+                <div className="bg-yellow-100 border border-yellow-400 text-yellow-800 px-3 py-1 rounded text-sm font-medium mr-4">
+                  TESTING MODE: {slideCount} insights
+                </div>
+              )}
+              {Array.from({ length: slideCount }).map((_, i) => (
                 <button
                   key={i}
                   onClick={() => onDotClick(i)}
@@ -303,100 +313,168 @@ export default function CollectionPage() {
               ))}
             </div>
 
-            {/* Slide content area: layout switches by slide */}
-            {activeSlide === 0 && (
-              <div className="content-stretch flex items-center justify-center w-full">
-                <div className="w-full">
-                  <NeriaResponse
-                    response={buildSlideText(data.slides?.[0]) || `Welcome to your channel snapshot, ${data.channelMeta.title}.`}
-                    isVisible={true}
-                    onComplete={() => setSlide1Done(true)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeSlide === 1 && (
-              <div className="content-stretch flex items-center justify-center w-full">
-                <div className="w-full">
-                  <NeriaResponse
-                    response={buildSlideText(data.slides?.[1])}
-                    isVisible={true}
-                    onComplete={() => setSlide2Done(true)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeSlide === 2 && (
-              <div className="content-stretch flex items-center justify-center w-full">
-                <div className="w-full">
-                  <NeriaResponse
-                    response={buildSlideText(data.slides?.[2])}
-                    isVisible={true}
-                    onComplete={() => setSlide3Done(true)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeSlide === 3 && (
-              <div className="content-stretch flex items-center justify-center w-full">
-                <div className="w-full">
-                  <NeriaResponse
-                    response={data.insights && data.insights.growthPotential 
-                      ? `Your channel is currently operating at only ${100 - data.insights.growthPotential.overall}% of its potential. That means you're leaving ${data.insights.growthPotential.overall}% of possible views, subscribers, and revenue on the table. The biggest opportunity is ${data.insights.topInsights[0]?.title.toLowerCase() || 'content optimization'}, which alone could recover ${data.insights.topInsights[0]?.evidence?.[0] || 'significant growth'}.`
-                      : `I've identified critical growth blockers in your channel. Based on channels similar to yours, you should be getting 3-5x more views. Let me show you exactly what's holding you back and how to fix it.`}
-                    isVisible={true}
-                    onComplete={() => setSlide4Done(true)}
-                  />
-                </div>
-              </div>
-            )}
-
-            {activeSlide === 4 && (
-              <div className="content-stretch w-full">
-                <div className="w-full max-w-4xl mx-auto">
-                  <h2 className="text-3xl font-bold text-black mb-8">Here's What You'll Unlock Immediately:</h2>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
-                      <div className="text-2xl mb-2">🎯</div>
-                      <h3 className="font-bold text-lg mb-2">Your 7 Viral Short Moments</h3>
-                      <p className="text-sm text-black/80">Exact timestamps from your videos that match viral patterns. Copy what's working for channels getting 10M+ Short views.</p>
+            {/* Dynamic slide content */}
+            {testingMode ? (
+              // Testing mode: show all insights as individual slides
+              <div className="content-stretch flex flex-col items-start justify-start w-full overflow-y-auto max-h-[70vh] pr-2" style={{scrollbarWidth: 'thin'}}>
+                {data.slides?.[activeSlide] && (
+                  <div className="w-full pb-8">
+                    <div className="mb-6">
+                      <h2 className="text-2xl font-bold text-black mb-2">{data.slides[activeSlide].headline}</h2>
+                      <div className="text-lg text-black/80 mb-4">{data.slides[activeSlide].body}</div>
                     </div>
                     
-                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
-                      <div className="text-2xl mb-2">📊</div>
-                      <h3 className="font-bold text-lg mb-2">Algorithm Recovery Plan</h3>
-                      <p className="text-sm text-black/80">3 proven strategies from channels that recovered from the November algorithm change. Most see results in 3-4 weeks.</p>
-                    </div>
+                    {/* Key Stats */}
+                    {data.slides[activeSlide].keyStats && data.slides[activeSlide].keyStats.length > 0 && (
+                      <div className="mb-6">
+                        <h3 className="font-semibold text-lg mb-3">Key Metrics:</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {data.slides[activeSlide].keyStats.map((stat, i) => (
+                            <div key={i} className="border border-gray-300 rounded p-3 bg-gray-50">
+                              <div className="font-medium text-sm text-black/70">{stat.label}</div>
+                              <div className="font-bold text-lg">{stat.value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     
-                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
-                      <div className="text-2xl mb-2">🔍</div>
-                      <h3 className="font-bold text-lg mb-2">Competitor Blind Spots</h3>
-                      <p className="text-sm text-black/80">5 topics your competitors missed that their audience is asking for. First-mover advantage on untapped content.</p>
-                    </div>
+                    {/* Actions */}
+                    {data.slides[activeSlide].actions && data.slides[activeSlide].actions.length > 0 && (
+                      <div className="mb-6">
+                        <h3 className="font-semibold text-lg mb-3">Recommended Actions:</h3>
+                        <ul className="list-disc list-inside space-y-2">
+                          {data.slides[activeSlide].actions.map((action, i) => (
+                            <li key={i} className="text-black/80">{action}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     
-                    <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
-                      <div className="text-2xl mb-2">💡</div>
-                      <h3 className="font-bold text-lg mb-2">AI Script Generator</h3>
-                      <p className="text-sm text-black/80">Generate complete video scripts based on your top performers. Includes hooks, retention tactics, and CTAs that convert.</p>
+                    {/* Data Sources - Testing Mode Only */}
+                    {data.insights?.topInsights[activeSlide]?.dataSources && (
+                      <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded">
+                        <h3 className="font-semibold text-lg mb-3 text-blue-800">📊 YouTube Analytics Data Sources:</h3>
+                        <ul className="list-disc list-inside space-y-1">
+                          {data.insights.topInsights[activeSlide].dataSources.map((source: string, i: number) => (
+                            <li key={i} className="text-blue-700 text-sm font-mono">{source}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {/* Raw Data - Testing Mode Only */}
+                    {data.insights?.topInsights[activeSlide]?.rawData && (
+                      <div className="mt-6 p-4 bg-green-50 border border-green-200 rounded">
+                        <h3 className="font-semibold text-lg mb-3 text-green-800">🔢 Actual YouTube Data Used:</h3>
+                        <div className="bg-white p-4 rounded border overflow-x-auto">
+                          <pre className="text-xs text-green-900 whitespace-pre-wrap font-mono">
+                            {JSON.stringify(data.insights.topInsights[activeSlide].rawData, null, 2)}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Normal mode: original slide content
+              <>
+                {activeSlide === 0 && (
+                  <div className="content-stretch flex items-center justify-center w-full">
+                    <div className="w-full">
+                      <NeriaResponse
+                        response={buildSlideText(data.slides?.[0]) || `Welcome to your channel snapshot, ${data.channelMeta.title}.`}
+                        isVisible={true}
+                        onComplete={() => setSlide1Done(true)}
+                      />
                     </div>
                   </div>
-                  
-                  <div className="text-center">
-                    <p className="text-lg text-black/60 mb-4">Join 1,247 creators already growing faster with Neria</p>
-                    <p className="text-sm text-red-600 font-semibold animate-pulse">⚠️ This analysis expires in 24 hours</p>
-                  </div>
-                </div>
-              </div>
-            )}
+                )}
 
-            {activeSlide === 5 && (
-              <div className="w-full flex items-center justify-center text-black">
-                <div className="text-xl">Ready to unlock your channel's full potential?</div>
-              </div>
+                {activeSlide === 1 && (
+                  <div className="content-stretch flex items-center justify-center w-full">
+                    <div className="w-full">
+                      <NeriaResponse
+                        response={buildSlideText(data.slides?.[1])}
+                        isVisible={true}
+                        onComplete={() => setSlide2Done(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeSlide === 2 && (
+                  <div className="content-stretch flex items-center justify-center w-full">
+                    <div className="w-full">
+                      <NeriaResponse
+                        response={buildSlideText(data.slides?.[2])}
+                        isVisible={true}
+                        onComplete={() => setSlide3Done(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeSlide === 3 && (
+                  <div className="content-stretch flex items-center justify-center w-full">
+                    <div className="w-full">
+                      <NeriaResponse
+                        response={data.insights && data.insights.growthPotential 
+                          ? `Your channel is currently operating at only ${100 - data.insights.growthPotential.overall}% of its potential. That means you're leaving ${data.insights.growthPotential.overall}% of possible views, subscribers, and revenue on the table. The biggest opportunity is ${data.insights.topInsights[0]?.title.toLowerCase() || 'content optimization'}, which alone could recover ${data.insights.topInsights[0]?.evidence?.[0] || 'significant growth'}.`
+                          : `I've identified critical growth blockers in your channel. Based on channels similar to yours, you should be getting 3-5x more views. Let me show you exactly what's holding you back and how to fix it.`}
+                        isVisible={true}
+                        onComplete={() => setSlide4Done(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeSlide === 4 && (
+                  <div className="content-stretch w-full">
+                    <div className="w-full max-w-4xl mx-auto">
+                      <h2 className="text-3xl font-bold text-black mb-8">Here's What You'll Unlock Immediately:</h2>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                        <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                          <div className="text-2xl mb-2">🎯</div>
+                          <h3 className="font-bold text-lg mb-2">Your 7 Viral Short Moments</h3>
+                          <p className="text-sm text-black/80">Exact timestamps from your videos that match viral patterns. Copy what's working for channels getting 10M+ Short views.</p>
+                        </div>
+                        
+                        <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                          <div className="text-2xl mb-2">📊</div>
+                          <h3 className="font-bold text-lg mb-2">Algorithm Recovery Plan</h3>
+                          <p className="text-sm text-black/80">3 proven strategies from channels that recovered from the November algorithm change. Most see results in 3-4 weeks.</p>
+                        </div>
+                        
+                        <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                          <div className="text-2xl mb-2">🔍</div>
+                          <h3 className="font-bold text-lg mb-2">Competitor Blind Spots</h3>
+                          <p className="text-sm text-black/80">5 topics your competitors missed that their audience is asking for. First-mover advantage on untapped content.</p>
+                        </div>
+                        
+                        <div className="border border-black rounded-lg p-6 bg-white shadow-[4px_4px_0_0_#000]">
+                          <div className="text-2xl mb-2">💡</div>
+                          <h3 className="font-bold text-lg mb-2">AI Script Generator</h3>
+                          <p className="text-sm text-black/80">Generate complete video scripts based on your top performers. Includes hooks, retention tactics, and CTAs that convert.</p>
+                        </div>
+                      </div>
+                      
+                      <div className="text-center">
+                        <p className="text-lg text-black/60 mb-4">Join 1,247 creators already growing faster with Neria</p>
+                        <p className="text-sm text-red-600 font-semibold animate-pulse">⚠️ This analysis expires in 24 hours</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeSlide === 5 && (
+                  <div className="w-full flex items-center justify-center text-black">
+                    <div className="text-xl">Ready to unlock your channel's full potential?</div>
+                  </div>
+                )}
+              </>
             )}
           </div>
 

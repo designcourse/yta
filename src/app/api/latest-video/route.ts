@@ -88,7 +88,7 @@ export async function GET(request: Request) {
     }
 
     const playlistItemsRes = await fetch(
-      `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${uploadsPlaylistId}&maxResults=1`,
+      `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${uploadsPlaylistId}&maxResults=10`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -102,11 +102,30 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Failed to fetch latest upload" }, { status: 500 });
     }
     const playlistItemsJson = await playlistItemsRes.json();
-    const firstItem = playlistItemsJson?.items?.[0];
-    const videoId = firstItem?.contentDetails?.videoId || firstItem?.snippet?.resourceId?.videoId;
-    if (!videoId) {
+    const items: any[] = Array.isArray(playlistItemsJson?.items) ? playlistItemsJson.items : [];
+    const ids: string[] = items.map((it: any) => it?.contentDetails?.videoId || it?.snippet?.resourceId?.videoId).filter(Boolean);
+    if (ids.length === 0) {
       return NextResponse.json({ error: "No videos found for this channel" }, { status: 404 });
     }
+
+    // Fetch statuses and pick the most recent public video
+    const videosRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=snippet,status&id=${ids.join(',')}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!videosRes.ok) {
+      const t = await videosRes.text();
+      console.error("YouTube videos.list(status) failed:", t);
+      return NextResponse.json({ error: "Failed to resolve video statuses" }, { status: 500 });
+    }
+    const vjson = await videosRes.json();
+    const publicVideos = (vjson.items || []).filter((v: any) => (v?.status?.privacyStatus || 'public') === 'public');
+    if (publicVideos.length === 0) {
+      return NextResponse.json({ error: "No public videos found" }, { status: 404 });
+    }
+    publicVideos.sort((a: any, b: any) => new Date(b?.snippet?.publishedAt || 0).getTime() - new Date(a?.snippet?.publishedAt || 0).getTime());
+    const chosen = publicVideos[0];
+    const videoId = chosen?.id as string;
 
     // Get video statistics
     const videoResponse = await fetch(
