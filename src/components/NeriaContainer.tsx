@@ -629,6 +629,19 @@ const NeriaContainer: React.FC = () => {
     }
   }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
 
+  useEffect(() => {
+    const handler = () => {
+      try {
+        setIsMinimized(false);
+        // Optionally pop into fullscreen so the panel is visible
+        if (!isFullscreen) setIsFullscreen(true);
+        // If Next Experiment is not yet loaded, it will load after channelId effect
+      } catch {}
+    };
+    window.addEventListener('open-next-experiment', handler);
+    return () => window.removeEventListener('open-next-experiment', handler);
+  }, [isFullscreen, setIsFullscreen]);
+
   return (
     <div 
       ref={containerRef}

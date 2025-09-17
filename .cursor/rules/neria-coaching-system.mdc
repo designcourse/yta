@@ -142,15 +142,15 @@ Acceptance:
 - Topic opportunities list shows relative overperformance; priors applied only for thin data.
 
 7) Trendlines and Health
-- [ ] Widgets on [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx): WTPI trend, AVD trend, VPH_24h trend across last 10 uploads.
-- [ ] “Win rate vs comparable” summary by topic cluster and length band.
+- [x] Widgets on [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx): WTPI trend, AVD trend, VPH_24h trend across last 10 uploads.
+- [x] "Win rate vs comparable" summary by topic cluster and length band.
 
 Acceptance:
 - Trends and win rates render without flakiness; topic/length filters work.
 
 8) Notifications and Rescue Flow
-- [ ] Server-side checks at T+1h (Supabase cron) to trigger rescue notifications when thresholds fail.
-- [ ] Client toast/modal in dashboard; deep link to “Next Experiment.”
+- [x] Server-side checks at T+1h (Supabase cron) to trigger rescue notifications when thresholds fail.
+- [x] Client toast/modal in dashboard; deep link to "Next Experiment."
 
 Acceptance:
 - Notifications fire only when criteria met; no duplicates; respect reduced-motion/accessibility.
