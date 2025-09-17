@@ -1,5 +1,7 @@
 import YouTubeStats from "@/components/YouTubeStats";
 import ExperimentsBacklog from "@/components/ExperimentsBacklog";
+import TrendsWidget from "@/components/TrendsWidget";
+import WinRateSummary from "@/components/WinRateSummary";
 
 export default async function ChannelDashboardPage({
   params,
@@ -13,6 +15,8 @@ export default async function ChannelDashboardPage({
   return (
     <div className="space-y-6">
       <YouTubeStats channelId={decoded} />
+      <TrendsWidget channelId={decoded} />
+      <WinRateSummary channelId={decoded} />
       <ExperimentsBacklog channelId={decoded} />
     </div>
   );
