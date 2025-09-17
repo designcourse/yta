@@ -54,6 +54,21 @@ export function thresholdVerdict(value: number | null | undefined, quantiles: Qu
   return 'neutral';
 }
 
+export function thresholdVerdictWeighted(
+  value: number | null | undefined,
+  quantiles: Quantiles | null,
+  factor: number
+): 'pass' | 'neutral' | 'fail' | 'unknown' {
+  if (value == null || !Number.isFinite(value) || !quantiles) return 'unknown';
+  const safe = Number.isFinite(factor) ? Math.max(0.1, Math.min(2, factor)) : 0.5;
+  const { median, iqr } = quantiles;
+  const upper = median + safe * iqr;
+  const lower = median - safe * iqr;
+  if (value >= upper) return 'pass';
+  if (value < lower) return 'fail';
+  return 'neutral';
+}
+
 export function confidenceFromSampleSize(sampleSize: number): 'low' | 'med' | 'high' {
   if (sampleSize >= 15) return 'high';
   if (sampleSize >= 8) return 'med';

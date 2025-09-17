@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { createSupabaseAdminClient } from '@/utils/supabase/admin';
-import { computeQuantiles, confidenceFromSampleSize, thresholdVerdict } from '@/utils/baselines';
+import { computeQuantiles, confidenceFromSampleSize, thresholdVerdict, thresholdVerdictWeighted } from '@/utils/baselines';
 
 export async function GET(request: Request) {
   try {
@@ -83,11 +83,79 @@ export async function GET(request: Request) {
       retention_pct: current?.avg_view_pct ?? null,
     } as const;
 
+    // Load user goal weights and map to metric sensitivity multipliers
+    let weights: { growth: number; monetization: number; community: number; shorts: number } | null = null;
+    try {
+      // Resolve internal channel UUID for goals lookup
+      const { data: ch } = await supabase
+        .from('channels')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('channel_id', channelId)
+        .maybeSingle();
+      if (ch?.id) {
+        const { data: g } = await supabase
+          .from('goals')
+          .select('weight_growth, weight_monetization, weight_community, weight_shorts')
+          .eq('user_id', user.id)
+          .eq('channel_id', ch.id)
+          .maybeSingle();
+        if (g) {
+          weights = {
+            growth: Number(g.weight_growth ?? 0.4),
+            monetization: Number(g.weight_monetization ?? 0.3),
+            community: Number(g.weight_community ?? 0.2),
+            shorts: Number(g.weight_shorts ?? 0.1),
+          };
+        }
+      }
+    } catch {}
+
+    // Default multipliers if no weights found
+    const multipliers = (() => {
+      // Base factor is 0.5 IQR in default thresholdVerdict; we scale that by sensitivity
+      // Heavier weight -> easier pass (narrower band), lighter weight -> harder pass (wider band)
+      // Map weights to sensitivity in [0.3, 0.8]
+      const map = (w: number) => {
+        const clamped = Math.max(0, Math.min(1, w));
+        return 0.8 - 0.5 * clamped; // w=1 => 0.3, w=0 => 0.8
+      };
+      const isShort = current?.is_short ? true : false;
+      const w = weights || { growth: 0.4, monetization: 0.3, community: 0.2, shorts: 0.1 };
+      // Metric-to-goal mapping
+      return {
+        ctr_24h: map(w.growth),
+        avd_24h: map(w.growth), // retention quality impacts growth
+        vpd_24h: map(w.growth), // velocity for growth
+        retention_pct: map(w.growth),
+        // Shorts emphasis: if shorts weight is high and this is a short, increase sensitivity a bit more
+        shortsBoost: isShort ? (1 - 0.2 * Math.max(0, Math.min(1, w.shorts))) : 1,
+        monetizationBoost: 1, // Placeholder for monetization-influenced metrics like SVR/WTPI when added
+        communityBoost: 1,
+      };
+    })();
+
     const verdicts = {
-      ctr_24h: thresholdVerdict(currentValues.ctr_24h, quantiles.ctr_24h),
-      avd_24h: thresholdVerdict(currentValues.avd_24h, quantiles.avd_24h),
-      vpd_24h: thresholdVerdict(currentValues.vpd_24h, quantiles.vpd_24h),
-      retention_pct: thresholdVerdict(currentValues.retention_pct, quantiles.retention_pct),
+      ctr_24h: thresholdVerdictWeighted(
+        currentValues.ctr_24h,
+        quantiles.ctr_24h,
+        multipliers.ctr_24h * multipliers.shortsBoost
+      ),
+      avd_24h: thresholdVerdictWeighted(
+        currentValues.avd_24h,
+        quantiles.avd_24h,
+        multipliers.avd_24h * multipliers.shortsBoost
+      ),
+      vpd_24h: thresholdVerdictWeighted(
+        currentValues.vpd_24h,
+        quantiles.vpd_24h,
+        multipliers.vpd_24h * multipliers.shortsBoost
+      ),
+      retention_pct: thresholdVerdictWeighted(
+        currentValues.retention_pct,
+        quantiles.retention_pct,
+        multipliers.retention_pct * multipliers.shortsBoost
+      ),
     } as const;
 
     // Return baselines and the comparable-set definition
@@ -107,6 +175,7 @@ export async function GET(request: Request) {
       },
       current: currentValues,
       verdicts,
+      goals: weights || null,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 });

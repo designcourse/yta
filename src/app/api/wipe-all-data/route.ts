@@ -103,6 +103,14 @@ export async function POST(request: Request) {
         .in("channel_id", channelIds);
       if (videoPlannerIdeasError) console.warn("⚠️ Error deleting video_planner_ideas:", videoPlannerIdeasError);
 
+      // Delete goals
+      const { error: goalsError } = await admin
+        .from("goals")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (goalsError) console.warn("⚠️ Error deleting goals:", goalsError);
+
       console.log("✅ Successfully deleted channel-related data");
     }
 

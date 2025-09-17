@@ -81,7 +81,7 @@ Acceptance:
   - Includes a debug dropdown (last 10 public videos) backed by `/api/channel-recent-videos` to switch the analyzed video.
 - [x] KPI card: shows comparable-set dims (format/lengthBand/topicCluster) + confidence; badges per metric with Current and Baseline median±IQR.
   - Metrics: `ctr_24h`, `avd_24h` (sec), `vpd_24h`, `retention_pct`.
-  - Verdicts computed via thresholds (`median ± 0.5×IQR`).
+  - Verdicts computed via thresholds (`median ± 0.5×IQR`), weight-adjusted by "My Goals".
 - [x] APIs in use (implemented):
   - Latest snapshot: [src/app/api/latest-video/route.ts](mdc:src/app/api/latest-video/route.ts)
     - GET params: `channelId`
@@ -124,9 +124,11 @@ Acceptance:
 - Backlog items auto-resolved with outcomes; lever win rates visible.
 
 5) “My Goals” Weights (existing page)
-- [ ] Page: [src/app/dashboard/[channelId]/my-goals/page.tsx](mdc:src/app/dashboard/[channelId]/my-goals/page.tsx) to store weights for Growth/Monetization/Community/Shorts.
-- [ ] Weights shift KPI importance and success thresholds (e.g., emphasize WTPI or SVR).
-- [ ] Persist in `channel_strategy` or new `goals` table.
+- [x] Page: [src/app/dashboard/[channelId]/my-goals/page.tsx](mdc:src/app/dashboard/[channelId]/my-goals/page.tsx) stores weights for Growth/Monetization/Community/Shorts.
+- [x] API: [src/app/api/goals/route.ts](mdc:src/app/api/goals/route.ts) `GET/POST` to fetch/save weights.
+- [x] DB: `goals` table with RLS; unique per `(user_id, channel_id)`.
+- [x] KPIs: [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts) applies weight-adjusted thresholds and returns `goals`.
+- [x] Experiments: proposal lever selection nudged by weights when no clear fail.
 
 Acceptance:
 - Changing weights visibly shifts “pass/fail” thresholds and experiment priority.
@@ -189,6 +191,7 @@ References:
 - [src/components/LatestVideoClient.tsx](mdc:src/components/LatestVideoClient.tsx)
 - [src/components/LastVideoContainer.tsx](mdc:src/components/LastVideoContainer.tsx)
 - [src/components/NeriaContainer.tsx](mdc:src/components/NeriaContainer.tsx)
+- [src/components/GoalsForm.tsx](mdc:src/components/GoalsForm.tsx)
 - [src/app/dashboard/[channelId]/my-goals/page.tsx](mdc:src/app/dashboard/[channelId]/my-goals/page.tsx)
 - [src/app/dashboard/[channelId]/page.tsx](mdc:src/app/dashboard/[channelId]/page.tsx)
 - [src/utils/neria-openai.ts](mdc:src/utils/neria-openai.ts)
@@ -196,5 +199,6 @@ References:
 - [src/app/api/latest-video/route.ts](mdc:src/app/api/latest-video/route.ts)
 - [src/app/api/channel-recent-videos/route.ts](mdc:src/app/api/channel-recent-videos/route.ts)
 - [src/app/api/dashboard/kpis/route.ts](mdc:src/app/api/dashboard/kpis/route.ts)
+- [src/app/api/goals/route.ts](mdc:src/app/api/goals/route.ts)
 - [src/app/api/latest-video-insights/route.ts](mdc:src/app/api/latest-video-insights/route.ts)
 
