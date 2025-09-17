@@ -177,6 +177,16 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
               My Goals
             </Link>
             <Link
+              href={`/dashboard/${encodeURIComponent(currentChannelId)}/competitors`}
+              className={`block text-base ${
+                isActivePath(`/dashboard/${currentChannelId}/competitors`)
+                  ? "text-gray-900 font-medium"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Competitors
+            </Link>
+            <Link
               href={`/dashboard/${encodeURIComponent(currentChannelId)}/thumbnail-content`}
               className={`block text-base ${
                 isActivePath(`/dashboard/${currentChannelId}/thumbnail-content`)

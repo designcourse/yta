@@ -134,9 +134,9 @@ Acceptance:
 - Changing weights visibly shifts “pass/fail” thresholds and experiment priority.
 
 6) Competitors Page
-- [ ] Page: [src/app/dashboard/[channelId]/competitors/page.tsx](mdc:src/app/dashboard/[channelId]/competitors/page.tsx) for managing competitor channels.
-- [ ] API: [src/app/api/competitors](mdc:src/app/api/competitors) resolve channels, fetch public stats, compute topic hit rates and velocity.
-- [ ] Use as priors when creator sample size is small; annotate insights with “prior-based” confidence.
+- [x] Page: [src/app/dashboard/[channelId]/competitors/page.tsx](mdc:src/app/dashboard/[channelId]/competitors/page.tsx) for managing competitor channels.
+- [x] API: [src/app/api/competitors](mdc:src/app/api/competitors) resolve channels, fetch public stats, compute topic hit rates and velocity.
+- [x] Use as priors when creator sample size is small; annotate insights with “prior-based” confidence.
 
 Acceptance:
 - Topic opportunities list shows relative overperformance; priors applied only for thin data.
@@ -174,7 +174,9 @@ Acceptance:
   - `GET /api/latest-video-insights` → per-video retention samples + transcript-based insights.
   - `POST /api/experiments` / `PATCH /api/experiments/:id` → backlog + outcomes.
   - `GET/POST /api/goals` → goal weights.
-  - `GET/POST /api/competitors` → competitor set, public stats.
+  - `GET/POST/DELETE /api/competitors` → competitor set, public stats; max 5 competitors per channel.
+  - `GET /api/competitors/resolve` → resolve channels by id/url/name.
+  - `GET /api/competitors/metrics` → velocity and topic hit rates (3h cache).
 
 ## Prompting and Grounding
 - Only pass numerics and facts from APIs; include confidence and window (T+1h/24h/7d).
