@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { proposeNextExperiment, proposeNextExperimentLLM } from '@/utils/neria-openai';
+import { logAi } from '@/utils/logging';
 
 export async function POST(request: Request) {
   try {
@@ -36,7 +37,33 @@ export async function POST(request: Request) {
       }
     } catch {}
     // Try LLM; fallback to deterministic
-    const proposal = await proposeNextExperimentLLM(kpisBundle, seed).catch(() => proposeNextExperiment(kpisBundle));
+    const start = Date.now();
+    let proposal;
+    let ok = true;
+    let errorMsg: string | null = null;
+    try {
+      proposal = await proposeNextExperimentLLM(kpisBundle, seed);
+    } catch (e: any) {
+      ok = false;
+      errorMsg = e?.message || 'LLM proposal failed';
+      proposal = await proposeNextExperiment(kpisBundle);
+    } finally {
+      try {
+        await logAi(supabase as any, {
+          userId: user.id,
+          channelId: null,
+          endpoint: '/api/experiments/propose',
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          input: { seed, kpis: { comparable: kpisBundle?.comparable, verdicts: kpisBundle?.verdicts } },
+          output: { proposal },
+          outputText: `${proposal?.lever || ''} :: ${proposal?.hypothesis || ''}`,
+          latencyMs: Date.now() - start,
+          ok,
+          error: errorMsg,
+        });
+      } catch {}
+    }
     return NextResponse.json({ proposal });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unknown error' }, { status: 500 });

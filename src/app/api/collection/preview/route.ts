@@ -8,6 +8,7 @@ import { ZNeriaOutput, EnhancedNeriaOutput } from "@/utils/types/neria";
 import { analyzeChannelInsights } from "@/utils/insights-analyzer";
 import { getPrompt, renderTemplate } from "@/utils/prompts";
 import { runNeriaAnalyzerGemini as generateText } from "@/utils/neria-gemini";
+import { logAi } from "@/utils/logging";
 
 // Simple per-process 24h cache keyed by user+channel (for response shape)
 const previewCache = new Map<string, { expiresAt: number; payload: any }>();
@@ -92,10 +93,42 @@ export async function GET(request: Request) {
         // Prefer Gemini 2.5 Flash for speed/cost; fallback to OpenAI if it fails
         let baseOutput;
         try {
+          const start = Date.now();
           baseOutput = await runNeriaAnalyzerGemini(neriaInput);
+          try {
+            await logAi(supabase as any, {
+              userId: user.id,
+              channelId: null,
+              endpoint: '/api/collection/preview',
+              provider: 'gemini',
+              model: 'gemini-2.5-pro',
+              input: { fields: Object.keys(neriaInput || {}) },
+              output: { slides: baseOutput?.slides?.map(s => ({ id: s.id, headline: s.headline })) },
+              outputText: baseOutput?.slides?.map(s => s.headline).join(' | ') || null,
+              latencyMs: Date.now() - start,
+              ok: true,
+              error: null,
+            });
+          } catch {}
         } catch (gErr) {
           console.warn('[preview] Gemini analyzer failed, falling back to OpenAI', gErr);
+          const start = Date.now();
           baseOutput = await runNeriaAnalyzer(neriaInput);
+          try {
+            await logAi(supabase as any, {
+              userId: user.id,
+              channelId: null,
+              endpoint: '/api/collection/preview',
+              provider: 'openai',
+              model: 'gpt-4o-mini',
+              input: { fields: Object.keys(neriaInput || {}) },
+              output: { slides: baseOutput?.slides?.map(s => ({ id: s.id, headline: s.headline })) },
+              outputText: baseOutput?.slides?.map(s => s.headline).join(' | ') || null,
+              latencyMs: Date.now() - start,
+              ok: true,
+              error: null,
+            });
+          } catch {}
         }
         
         // If we have insights, create enhanced slides focusing on top problems

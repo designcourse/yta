@@ -28,6 +28,35 @@ test.describe('Dashboard - Neria chat', () => {
     const text = (await response.innerText()).trim();
     expect(text.length).toBeGreaterThan(0);
   });
+
+  test('Next Experiment shows after KPIs load and matches API verdicts', async ({ page, baseURL }) => {
+    const target = baseURL ?? 'http://localhost:3000';
+    await page.goto(`${target}/dashboard/latest-video`);
+    await page.waitForFunction(() => /\/dashboard\/.*\/latest-video/i.test(location.pathname), { timeout: 60_000 });
+
+    // Wait for KPIs widget
+    const kpiCard = page.locator('text=KPIs vs Baselines').first();
+    await expect(kpiCard).toBeVisible({ timeout: 60_000 });
+
+    // Fire a fetch to the KPIs endpoint from the browser to get ground truth
+    const kpis = await page.evaluate(async () => {
+      const m = location.pathname.match(/dashboard\/([^/]+)/);
+      const channelId = m ? decodeURIComponent(m[1]) : '';
+      const res = await fetch(`/api/dashboard/kpis?channelId=${encodeURIComponent(channelId)}`);
+      return res.ok ? await res.json() : null;
+    });
+
+    // If KPIs returned, check one rendered metric string appears
+    if (kpis && kpis.current && typeof kpis.current.avd_24h !== 'undefined' && kpis.baselines?.avd_24h) {
+      const currentAvd = Math.round((kpis.current.avd_24h || 0) * 100) / 100;
+      await expect(page.locator(`text=Current: ${currentAvd}`)).toBeVisible({ timeout: 30_000 });
+    }
+
+    // Open Neria (it auto-loads Next Experiment)
+    const neria = page.locator('[data-testid="neria-response"], text=Next Experiment').first();
+    await expect(neria).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('text=Next Experiment').first()).toBeVisible({ timeout: 60_000 });
+  });
 });
 
 

@@ -64,7 +64,7 @@ Remember: Output ONLY the JSON object. No explanations, no markdown formatting, 
 export async function runNeriaAnalyzerGemini(neriaInput: NeriaInput): Promise<NeriaOutput> {
   const systemPrompt = `You are Neria, a YouTube mentor. Analyze the provided channel data and return ONLY valid JSON.
 
-CRITICAL: Do NOT mention impressions, CTR, or advertising metrics. Focus on views, retention, duration, subscribers.
+CRITICAL: Do NOT invent metrics or cite competitor private data. Only reason over metrics provided in the input. Do NOT mention impressions/CTR unless those fields exist in the input. Focus on views, retention, duration, subscribers.
 
 Return EXACTLY this JSON structure (replace content but keep exact format):
 

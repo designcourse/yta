@@ -99,27 +99,57 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
   const videoCount = Number(ch?.statistics?.videoCount || 0);
   const totalViews = Number(ch?.statistics?.viewCount || 0);
 
-  // Establish rolling window
+  // Establish rolling window - start with 90 days
   const end = new Date();
-  const start = new Date();
+  let start = new Date();
   start.setDate(end.getDate() - 90);
 
-  // LATEST VIDEOS (SEARCH) - bound to last 90 days
+  // LATEST VIDEOS (SEARCH) - try multiple time windows if needed
   let searchN = COLLECTION_SAMPLE_SIZE;
   let searchItems: any[] = [];
-  try {
-    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(channelId)}&type=video&order=date&maxResults=${searchN}&publishedAfter=${encodeURIComponent(start.toISOString())}&publishedBefore=${encodeURIComponent(end.toISOString())}`;
-    console.log('[aggregator] search URL', searchUrl);
+  let searchWindow = 90; // Start with 90 days
+  
+  const trySearch = async (days: number, maxResults: number) => {
+    const searchStart = new Date();
+    searchStart.setDate(end.getDate() - days);
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(channelId)}&type=video&order=date&maxResults=${maxResults}&publishedAfter=${encodeURIComponent(searchStart.toISOString())}&publishedBefore=${encodeURIComponent(end.toISOString())}`;
+    console.log(`[aggregator] search URL (${days}d window)`, searchUrl);
     const searchJson = await fetchJson(searchUrl, accessToken);
-    searchItems = Array.isArray(searchJson?.items) ? searchJson.items : [];
-  } catch {
-    searchN = 5;
+    return Array.isArray(searchJson?.items) ? searchJson.items : [];
+  };
+
+  // Try progressively larger windows until we find videos
+  const searchWindows = [90, 180, 365, 730]; // 90d, 6m, 1y, 2y
+  
+  for (const windowDays of searchWindows) {
     try {
-      const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(channelId)}&type=video&order=date&maxResults=${searchN}&publishedAfter=${encodeURIComponent(start.toISOString())}&publishedBefore=${encodeURIComponent(end.toISOString())}`;
-      const searchJson = await fetchJson(searchUrl, accessToken);
-      searchItems = Array.isArray(searchJson?.items) ? searchJson.items : [];
-    } catch {}
+      searchItems = await trySearch(windowDays, searchN);
+      if (searchItems.length > 0) {
+        searchWindow = windowDays;
+        console.log(`[aggregator] Found ${searchItems.length} videos in ${windowDays}-day window`);
+        break;
+      }
+      console.log(`[aggregator] No videos found in ${windowDays}-day window, trying larger window...`);
+    } catch (error) {
+      console.log(`[aggregator] Search failed for ${windowDays}-day window:`, error);
+      // Try with smaller batch size on first window
+      if (windowDays === 90 && searchN > 5) {
+        try {
+          searchItems = await trySearch(windowDays, 5);
+          if (searchItems.length > 0) {
+            searchN = 5;
+            searchWindow = windowDays;
+            console.log(`[aggregator] Found ${searchItems.length} videos with reduced batch size`);
+            break;
+          }
+        } catch {}
+      }
+    }
   }
+  
+  // Update start date to match the successful search window
+  start = new Date();
+  start.setDate(end.getDate() - searchWindow);
 
   // DEBUG: basic cardinalities
   console.log('[aggregator] search count', searchItems.length);
@@ -356,6 +386,14 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
     const rows = neriaInput.recentUploads.map((v) => {
       const daysSince = Math.max(1, Math.min(90, daysDiff(v.publishedAt, today)));
       const viewsPerDay = v.views / daysSince;
+      
+      // Debug logging for VPD calculation issues
+      console.log(`[VPD Debug] Video ${v.id}: ${v.views} views, ${daysSince} days since ${v.publishedAt}, VPD: ${viewsPerDay.toFixed(2)}`);
+      
+      // Use per-video AVD/retention when available; otherwise fall back to rollup estimates
+      const avdSec = v.avgViewDurationSec != null ? v.avgViewDurationSec : (fallbackAvgDur != null ? Math.round(fallbackAvgDur) : null);
+      const avPct = v.avgViewPct != null ? v.avgViewPct : (fallbackAvgPct != null ? Math.round(fallbackAvgPct * 100) / 100 : null);
+      
       return {
         user_id: userId,
         channel_id: channelId,
@@ -368,8 +406,8 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
         topic_cluster: null,
         views: v.views,
         views_per_day: Math.round(viewsPerDay * 100) / 100,
-        avg_view_duration_sec: v.avgViewDurationSec,
-        avg_view_pct: v.avgViewPct,
+        avg_view_duration_sec: avdSec,
+        avg_view_pct: avPct,
         impressions: null,
         ctr: null,
         vph_24h: null,

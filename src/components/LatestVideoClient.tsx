@@ -86,10 +86,21 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
         const j = await res.json();
         setKpis(j);
       } else {
-        setKpis(null);
+        const errorData = await res.json().catch(() => ({}));
+        console.error('KPIs API Error:', errorData);
+        setKpis({ 
+          error: true, 
+          message: errorData.error || 'Failed to fetch KPIs',
+          details: errorData.details || 'Unknown error occurred'
+        });
       }
-    } catch {
-      setKpis(null);
+    } catch (error) {
+      console.error('Error fetching KPIs:', error);
+      setKpis({ 
+        error: true, 
+        message: 'Network error', 
+        details: 'Failed to connect to KPIs API'
+      });
     } finally {
       setKpisLoading(false);
     }
@@ -200,18 +211,88 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
           <div className="mt-8 bg-white border border-white/20 rounded-lg p-4">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-black font-medium">KPIs vs Baselines (comparable set)</h3>
-              <button
-                className="text-sm text-blue-600 hover:text-blue-700"
-                onClick={() => { fetchKpis(); }}
-                disabled={kpisLoading}
-              >{kpisLoading ? 'Refreshing…' : 'Refresh KPIs'}</button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="text-sm text-green-600 hover:text-green-700"
+                  onClick={async () => {
+                    try {
+                      setKpisLoading(true);
+                      const response = await fetch('/api/refresh-metrics', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ channelId }),
+                      });
+                      if (response.ok) {
+                        // After refreshing metrics, refresh KPIs
+                        await fetchKpis();
+                      } else {
+                        console.error('Failed to refresh metrics');
+                      }
+                    } catch (error) {
+                      console.error('Error refreshing metrics:', error);
+                    } finally {
+                      setKpisLoading(false);
+                    }
+                  }}
+                  disabled={kpisLoading}
+                >
+                  {kpisLoading ? 'Refreshing...' : 'Refresh Metrics'}
+                </button>
+                <button
+                  className="text-sm text-blue-600 hover:text-blue-700"
+                  onClick={() => { fetchKpis(); }}
+                  disabled={kpisLoading}
+                >
+                  {kpisLoading ? 'Refreshing…' : 'Refresh KPIs'}
+                </button>
+              </div>
             </div>
             {!kpis && !kpisLoading && (
               <div className="text-black/70 text-sm">No KPIs yet. Click Refresh KPIs.</div>
             )}
-            {kpis && (
+            {kpis && kpis.error && (
+              <div className={`border rounded-lg p-4 ${kpis.isRecent ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`}>
+                <div className={`font-medium ${kpis.isRecent ? 'text-yellow-800' : 'text-red-800'}`}>
+                  {kpis.isRecent ? '⏳' : '❌'} {kpis.message}
+                </div>
+                <div className={`text-sm mt-1 ${kpis.isRecent ? 'text-yellow-700' : 'text-red-600'}`}>
+                  {kpis.details}
+                </div>
+                {kpis.videoAge && (
+                  <div className={`text-xs mt-2 ${kpis.isRecent ? 'text-yellow-600' : 'text-red-600'}`}>
+                    Video age: {kpis.videoAge}
+                  </div>
+                )}
+                {kpis.isRecent ? (
+                  <div className="text-yellow-600 text-xs mt-2">
+                    ✅ YouTube Analytics API is working (verified with older videos)<br/>
+                    🕒 Your video just needs more time to process - this is normal!
+                  </div>
+                ) : (
+                  <div className="text-red-600 text-xs mt-2">
+                    💡 This may be due to:
+                    <ul className="list-disc list-inside mt-1">
+                      <li>Missing YouTube Analytics permissions (try reconnecting your account)</li>
+                      <li>API rate limits or temporary issues</li>
+                      <li>Video privacy settings</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+            {kpis && !kpis.error && (
               <div className="text-sm text-black space-y-2">
-                <div className="text-black/70">Comparable set: {kpis?.comparable?.count ?? 0} • format {kpis?.comparable?.dims?.format} • length {kpis?.comparable?.dims?.lengthBand || '—'} • confidence {kpis?.comparable?.confidence}</div>
+                <div className="text-black/70">
+                  Comparable set: {kpis?.comparable?.count ?? 0} • format {kpis?.comparable?.dims?.format} • length {kpis?.comparable?.dims?.lengthBand || '—'} • confidence {kpis?.comparable?.confidence}
+                  {kpis?.comparable?.timeNormalized && (
+                    <div className="mt-1 text-blue-600 text-xs">
+                      {kpis.comparable.timeNormalized.method === 'youtube_analytics' ? '🎯' : '📊'} {kpis.comparable.timeNormalized.note} • 
+                      Window: {kpis.comparable.timeNormalized.timeWindow} • 
+                      Source: {kpis.comparable.timeNormalized.dataSource}
+                      {kpis.comparable.timeNormalized.successRate && ` • Success: ${kpis.comparable.timeNormalized.successRate}`}
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
                     { key: 'avd_24h', label: 'Avg View Duration (s)' },

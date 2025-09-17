@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getClient, getCurrentModel } from "@/utils/openai";
+import { logAi } from "@/utils/logging";
 import { getValidAccessToken } from "@/utils/googleAuth";
 import { getPrompt } from "@/utils/prompts";
 
@@ -1296,6 +1297,7 @@ export async function POST(request: Request) {
 
     // Call GPT-4o with streaming
     const client = getClient('openai');
+    const startedAt = Date.now();
     const stream = await client.chat.completions.create({
       model: primaryModel.model,
       messages,
@@ -1340,6 +1342,23 @@ export async function POST(request: Request) {
           await supabase
             .from("chat_messages")
             .insert({ thread_id: threadId, role: "assistant", content: assistantContent });
+
+          // Best-effort AI log (sanitized)
+          try {
+            await logAi(supabase as any, {
+              userId: user.id,
+              channelId: pinned.channelId || null,
+              endpoint: '/api/neria/chat',
+              provider: 'openai',
+              model: primaryModel.model,
+              input: { message: body.message.slice(0, 500), contextPercentage },
+              output: null,
+              outputText: assistantContent,
+              latencyMs: Date.now() - startedAt,
+              ok: true,
+              error: null,
+            });
+          } catch {}
 
           // Analyze user intent using AI
           const intent = await analyzeUserIntent(

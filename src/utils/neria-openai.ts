@@ -27,7 +27,7 @@ When comparing performance, use benchmarks if present. If not present, use direc
 
 Focus on available metrics: views, retention percentage, view duration, subscriber growth, upload consistency.
 
-Do not mention impressions, CTR, or advertising metrics as these require different permissions.
+Do not mention competitor private metrics or fabricate retention curves. If a metric is not supplied in neriaInput, do not invent it. Do not mention impressions, CTR, or advertising metrics unless present in neriaInput.
 
 Output Schema (return exactly this shape)
 {
