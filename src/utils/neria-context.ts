@@ -1,9 +1,17 @@
 import { createSupabaseServerClient } from '@/utils/supabase/server';
+import { createSupabaseAdminClient } from '@/utils/supabase/admin';
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
 type ContextBundle = {
   refreshedAt: string;
+  nextVideo?: {
+    status: 'none' | 'set';
+    title?: string;
+    planId?: string;
+    hasThumbnail?: boolean;
+    hasOutline?: boolean;
+  };
   kpis?: {
     videoId: string | null;
     comparable: { count: number; dims: { format?: string | null; lengthBand?: string | null; topicCluster?: string | null }; confidence: string };
@@ -50,6 +58,18 @@ function trim(text?: string, max = 220): string | undefined {
 }
 
 async function readCachedBundle(supabase: any, internalChannelId: string): Promise<ContextBundle | null> {
+  const ttlMs = 45 * 60 * 1000; // 45 minutes
+  const tryParse = (raw?: string | null) => {
+    if (!raw) return null;
+    try {
+      const parsed: ContextBundle = JSON.parse(raw);
+      const ts = parsed?.refreshedAt ? new Date(parsed.refreshedAt).getTime() : 0;
+      if (ts && Date.now() - ts < ttlMs) return parsed;
+      return null;
+    } catch {
+      return null;
+    }
+  };
   try {
     const { data } = await supabase
       .from('neria_context')
@@ -57,15 +77,22 @@ async function readCachedBundle(supabase: any, internalChannelId: string): Promi
       .eq('channel_id', internalChannelId)
       .eq('prompt_type', 'context_bundle')
       .maybeSingle();
-    if (!data?.prompt_text) return null;
-    const parsed: ContextBundle = JSON.parse(data.prompt_text);
-    const ttlMs = 45 * 60 * 1000; // 45 minutes
-    const ts = parsed?.refreshedAt ? new Date(parsed.refreshedAt).getTime() : 0;
-    if (ts && Date.now() - ts < ttlMs) return parsed;
-    return null;
-  } catch {
-    return null;
-  }
+    const parsed = tryParse(data?.prompt_text);
+    if (parsed) return parsed;
+  } catch {}
+  // Fallback to admin client read (in case RLS blocks user read)
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data } = await admin
+      .from('neria_context')
+      .select('prompt_text')
+      .eq('channel_id', internalChannelId)
+      .eq('prompt_type', 'context_bundle')
+      .maybeSingle();
+    const parsed = tryParse(data?.prompt_text);
+    if (parsed) return parsed;
+  } catch {}
+  return null;
 }
 
 async function writeCachedBundle(supabase: any, internalChannelId: string, bundle: ContextBundle) {
@@ -78,7 +105,20 @@ async function writeCachedBundle(supabase: any, internalChannelId: string, bundl
         prompt_text: JSON.stringify(bundle),
         updated_at: new Date().toISOString(),
       }, { onConflict: 'channel_id,prompt_type' });
-  } catch {}
+  } catch {
+    // Fallback to admin client in case of RLS issues
+    try {
+      const admin = createSupabaseAdminClient();
+      await admin
+        .from('neria_context')
+        .upsert({
+          channel_id: internalChannelId,
+          prompt_type: 'context_bundle',
+          prompt_text: JSON.stringify(bundle),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'channel_id,prompt_type' });
+    } catch {}
+  }
 }
 
 export async function buildNeriaContextBundle(opts: {
@@ -92,6 +132,16 @@ export async function buildNeriaContextBundle(opts: {
   // Try cached bundle first
   const cached = await readCachedBundle(supabase, internalChannelId);
   if (cached) return cached;
+
+  // In-memory cache as a second layer (per-process) to avoid redundant refetch
+  // Note: this is per server instance; still provides protection during bursts.
+  const g: any = globalThis as any;
+  g.__neriaContextCache ||= new Map<string, { ts: number; bundle: ContextBundle }>();
+  const key = `bundle:${internalChannelId}`;
+  const hit = g.__neriaContextCache.get(key);
+  if (hit && Date.now() - hit.ts < 45 * 60 * 1000) {
+    return hit.bundle;
+  }
 
   const origin = new URL(request.url).origin;
   const cookie = request.headers.get('cookie') || '';
@@ -171,6 +221,38 @@ export async function buildNeriaContextBundle(opts: {
     }
   } catch {}
 
+  // Next video status + thumbnail/outline completion
+  try {
+    // Fetch plans to identify which one is marked as next
+    const pRes = await fetcher(`${origin}/api/video-plans?channelId=${encodeURIComponent(channelExternalId)}`);
+    if (pRes.ok) {
+      const pj = await pRes.json();
+      const plans: Array<any> = Array.isArray(pj?.plans) ? pj.plans : [];
+      const next = plans.find((p: any) => p?.is_next);
+      if (!next) {
+        bundle.nextVideo = { status: 'none' };
+      } else {
+        // Outline status: check scripts API for this plan
+        let hasOutline = false;
+        try {
+          const sRes = await fetcher(`${origin}/api/scripts?planId=${encodeURIComponent(next.id)}`);
+          if (sRes.ok) {
+            const sj = await sRes.json();
+            hasOutline = !!(sj?.script && Array.isArray(sj?.script?.sections) && sj.script.sections.length > 0);
+          }
+        } catch {}
+
+        bundle.nextVideo = {
+          status: 'set',
+          title: String(next.title || ''),
+          planId: String(next.id || ''),
+          hasThumbnail: !!next.thumbnail_url,
+          hasOutline,
+        };
+      }
+    }
+  } catch {}
+
   // Competitor priors (cached 3h in API)
   try {
     const cRes = await fetcher(`${origin}/api/competitors/metrics?channelId=${encodeURIComponent(channelExternalId)}`);
@@ -217,6 +299,11 @@ export async function buildNeriaContextBundle(opts: {
 
   // Persist snapshot for brief reuse
   await writeCachedBundle(supabase, internalChannelId, bundle);
+  try {
+    const g2: any = globalThis as any;
+    g2.__neriaContextCache ||= new Map();
+    g2.__neriaContextCache.set(key, { ts: Date.now(), bundle });
+  } catch {}
   return bundle;
 }
 
@@ -224,6 +311,18 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
   const lines: string[] = [];
   lines.push('CONTEXT BUNDLE (facts only)');
   lines.push(`Refreshed: ${bundle.refreshedAt}`);
+  // Next video guidance line
+  if (bundle.nextVideo) {
+    if (bundle.nextVideo.status === 'none') {
+      lines.push('NEXT VIDEO: The user has not specified their next video.');
+    } else {
+      const nv = bundle.nextVideo;
+      const steps: string[] = [];
+      steps.push(nv.hasThumbnail ? 'thumbnail=done' : 'thumbnail=pending');
+      steps.push(nv.hasOutline ? 'outline=done' : 'outline=pending');
+      lines.push(`NEXT VIDEO: ${nv.title || '(untitled)'} [${steps.join(', ')}]`);
+    }
+  }
   if (bundle.kpis) {
     const k = bundle.kpis;
     const dims = k.comparable?.dims || {};
@@ -266,6 +365,75 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
     }
   }
   return lines.join('\n');
+}
+
+export async function invalidateNeriaContextCache(internalChannelId: string) {
+  // Remove DB snapshot for this channel
+  try {
+    const admin = createSupabaseAdminClient();
+    await admin
+      .from('neria_context')
+      .delete()
+      .eq('channel_id', internalChannelId)
+      .eq('prompt_type', 'context_bundle');
+  } catch {}
+  // Clear in-memory cache
+  try {
+    const g: any = globalThis as any;
+    if (g.__neriaContextCache instanceof Map) {
+      g.__neriaContextCache.delete(`bundle:${internalChannelId}`);
+    }
+  } catch {}
+}
+
+export async function patchNeriaContextNextVideo(internalChannelId: string, next: { title: string; planId: string; hasThumbnail: boolean; hasOutline: boolean }) {
+  try {
+    const supabase = await createSupabaseServerClient();
+    // Try to read existing bundle (DB or memory)
+    let bundle = await readCachedBundle(supabase, internalChannelId);
+    if (!bundle) {
+      // Fallback to memory cache
+      try {
+        const g: any = globalThis as any;
+        if (g.__neriaContextCache instanceof Map) {
+          const hit = g.__neriaContextCache.get(`bundle:${internalChannelId}`);
+          if (hit && hit.bundle) bundle = hit.bundle as ContextBundle;
+        }
+      } catch {}
+    }
+    const base: ContextBundle = bundle || { refreshedAt: new Date().toISOString() };
+    base.nextVideo = {
+      status: 'set',
+      title: next.title,
+      planId: next.planId,
+      hasThumbnail: !!next.hasThumbnail,
+      hasOutline: !!next.hasOutline,
+    };
+    base.refreshedAt = base.refreshedAt || new Date().toISOString();
+    // Write back to DB + memory
+    await writeCachedBundle(supabase, internalChannelId, base);
+    try {
+      const g: any = globalThis as any;
+      g.__neriaContextCache ||= new Map();
+      g.__neriaContextCache.set(`bundle:${internalChannelId}`, { ts: Date.now(), bundle: base });
+    } catch {}
+  } catch {}
+}
+
+export async function getCachedContextBundle(internalChannelId: string): Promise<ContextBundle | null> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const cached = await readCachedBundle(supabase, internalChannelId);
+    if (cached) return cached;
+  } catch {}
+  try {
+    const g: any = globalThis as any;
+    if (g.__neriaContextCache instanceof Map) {
+      const hit = g.__neriaContextCache.get(`bundle:${internalChannelId}`);
+      if (hit && hit.bundle) return hit.bundle as ContextBundle;
+    }
+  } catch {}
+  return null;
 }
 
 

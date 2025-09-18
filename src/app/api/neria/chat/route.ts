@@ -107,12 +107,16 @@ Determine the appropriate action based on the user's intent:
 
 Consider these patterns:
 - "give me titles", "generate titles", "video ideas", "what should I make videos about", "suggest video topics", "create video titles" = generate_video_titles
+- "generate script", "create script", "write script", "script outline", "video outline", "generate outline", "script for this", "outline for this", "short script", "write me a script" = chat_only (script requests should be handled in regular chat flow)
 - "show me planner", "go to planner", "take me to video planner" = navigate_to_planner  
 - "my goals", "set goals", "goal tracking" = navigate_to_goals
 - "how is my channel doing", "show analytics", "performance" = navigate_to_analytics
 - General questions, strategy advice, explanations, asking about topics/trends = chat_only
 
-IMPORTANT: Only use "generate_video_titles" if the user is EXPLICITLY asking for video title suggestions, video ideas, or content creation help. Questions about topics, trends, or general information should be "chat_only".
+IMPORTANT: 
+- Only use "generate_video_titles" if the user is EXPLICITLY asking for video title suggestions, video ideas, or content creation help.
+- Script generation requests should use "chat_only" so they go through the normal chat flow which has script generation logic.
+- Questions about topics, trends, or general information should be "chat_only".
 
 Examples of "chat_only":
 - "what is the most popular metal track..."
@@ -120,6 +124,8 @@ Examples of "chat_only":
 - "how do I..."
 - "what are the trends in..."
 - "explain..."
+- "generate a script for this"
+- "write me a script outline"
 
 Examples of "generate_video_titles":
 - "give me video ideas"

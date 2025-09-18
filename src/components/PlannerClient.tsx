@@ -27,7 +27,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [videoIdeas, setVideoIdeas] = useState<VideoIdeaData[]>([]);
-  const [savedPlans, setSavedPlans] = useState<{ id: string; title: string; created_at: string; thumbnail_url?: string | null; thumbnail_selected_at?: string | null }[]>([]);
+  const [savedPlans, setSavedPlans] = useState<{ id: string; title: string; created_at: string; thumbnail_url?: string | null; thumbnail_selected_at?: string | null; is_next?: boolean }[]>([]);
   const [channelData, setChannelData] = useState<ChannelData | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -102,7 +102,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
       const res = await fetch(`/api/video-plans?channelId=${encodeURIComponent(channelId)}`, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
-      const plans = (data.plans || []) as { id: string; title: string; created_at: string; thumbnail_url?: string | null; thumbnail_selected_at?: string | null }[];
+      const plans = (data.plans || []) as { id: string; title: string; created_at: string; thumbnail_url?: string | null; thumbnail_selected_at?: string | null; is_next?: boolean }[];
       setSavedPlans(plans);
     } catch {}
   }, [channelId]);
@@ -254,6 +254,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
     }, 300);
   };
 
+
   return (
     <div className="space-y-15">
       {savedPlans.length > 0 && (
@@ -264,14 +265,22 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
             }`}
           >
             {savedPlans.map((plan) => (
-              <button
+              <div
                 key={plan.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => router.push(`/dashboard/${encodeURIComponent(channelId)}/planner/video/${encodeURIComponent(plan.id)}`)}
-                className="transition-all duration-300 text-left planner-card-hover"
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); router.push(`/dashboard/${encodeURIComponent(channelId)}/planner/video/${encodeURIComponent(plan.id)}`); } }}
+                className="transition-all duration-300 text-left planner-card-hover focus:outline-none focus:ring-2 focus:ring-blue-400 rounded-lg"
                 style={{ minWidth: '300px' }}
               >
                 <div className="bg-white rounded-lg overflow-hidden">
                   <div className="w-full h-[221px] flex items-center justify-center relative" style={{ backgroundColor: '#D7D9F2' }}>
+                    {plan.is_next && (
+                      <div className="absolute top-2 left-2 px-2 py-1 rounded bg-black/80 text-white text-[10px] font-bold tracking-wide">
+                        NEXT VIDEO
+                      </div>
+                    )}
                     {plan.thumbnail_url ? (
                       // If a custom thumbnail was selected for this plan, show it
                       (() => {
@@ -329,9 +338,11 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
                       </h3>
                       <p className="text-base text-gray-600">{channelData?.title || 'DesignCourse'}</p>
                     </div>
+                    {/* 3-dot menu to mark as next */}
+                    <PlanMenu planId={plan.id} title={plan.title} channelId={channelId} isNext={!!plan.is_next} onMarked={fetchSavedPlans} />
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>
@@ -442,6 +453,73 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
             </svg>
             {(generating || isGeneratingFromChat) ? 'Generating...' : 'Generate Ideas'}
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanMenu({ planId, title, channelId, isNext, onMarked }: { planId: string; title: string; channelId: string; isNext: boolean; onMarked: () => void }) {
+  const [open, setOpen] = useState(false);
+  
+  useEffect(() => {
+    const handleClickOutside = () => setOpen(false);
+    if (open) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [open]);
+  
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="p-1 rounded hover:bg-gray-100"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(v => !v); }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <circle cx="5" cy="12" r="2" fill="currentColor"/>
+          <circle cx="12" cy="12" r="2" fill="currentColor"/>
+          <circle cx="19" cy="12" r="2" fill="currentColor"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded shadow-md z-10"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {!isNext && (
+            <button
+              className="w-full text-left px-3 py-2 hover:bg-gray-50"
+              onClick={async () => {
+                try {
+                  await fetch('/api/video-plans', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: planId, mark_next: true }),
+                  });
+                  // Proactively let Neria react immediately to the new next video
+                  try {
+                    console.log('[PlannerClient] Dispatching next video event:', { title, channelId });
+                    window.dispatchEvent(new CustomEvent('neria-next-video-updated', { detail: { title, channelId } }));
+                    try {
+                      localStorage.setItem('neriaNextVideo', JSON.stringify({ channelId, title }));
+                    } catch {}
+                  } catch (err) {
+                    console.error('[PlannerClient] Error dispatching event:', err);
+                  }
+                  setOpen(false);
+                  onMarked();
+                } catch {}
+              }}
+            >
+              Mark as next video
+            </button>
+          )}
+          {isNext && (
+            <div className="px-3 py-2 text-xs text-green-700">This is marked as next</div>
+          )}
         </div>
       )}
     </div>

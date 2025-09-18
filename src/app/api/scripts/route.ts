@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getClient } from "@/utils/openai";
 import { getPrompt } from "@/utils/prompts";
+import { patchNeriaContextNextVideo } from "@/utils/neria-context";
 
 type GenerateBody = {
   planId: string;
@@ -221,6 +222,26 @@ export async function POST(request: Request) {
     }
 
     await supabase.from("scripts").update({ status: "ready" }).eq("id", scriptId);
+
+    // Update Neria's context to reflect that this video now has an outline (if it's the next video)
+    try {
+      const { data: planCheck } = await supabase
+        .from("video_plans")
+        .select("id, title, thumbnail_url, is_next, channel_id")
+        .eq("id", body.planId)
+        .maybeSingle();
+      
+      if (planCheck?.is_next && planCheck?.channel_id) {
+        await patchNeriaContextNextVideo(planCheck.channel_id, {
+          title: planCheck.title || '',
+          planId: planCheck.id,
+          hasThumbnail: !!planCheck.thumbnail_url,
+          hasOutline: true, // Script was just generated successfully
+        });
+      }
+    } catch (err) {
+      console.error('[Scripts] Failed to update Neria context after script generation:', err);
+    }
 
     return NextResponse.json({ status: "ready", scriptId });
   } catch (e: any) {

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getClient } from "@/utils/openai";
 import { getPrompt, renderTemplate } from "@/utils/prompts";
+import { getCachedContextBundle, invalidateNeriaContextCache, patchNeriaContextNextVideo } from "@/utils/neria-context";
 
 async function loadChannelContext(supabase: any, userId: string, externalChannelId: string) {
   const { data: channelMeta, error: chErr } = await supabase
@@ -77,12 +78,55 @@ export async function POST(request: Request) {
       updated_at: new Date().toISOString(),
     };
 
+    // Insert plan
     const { data: planRows, error: insErr } = await admin
       .from("video_plans")
       .insert(insertPayload)
       .select("id")
       .single();
     if (insErr || !planRows) return NextResponse.json({ error: "Failed to create plan" }, { status: 500 });
+
+    // If this is the first plan for this user+channel, auto-mark as next
+    try {
+      const { data: countRows } = await admin
+        .from('video_plans')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('channel_id', ctx.channelMeta.id);
+      const total = (countRows as any)?.length ?? (countRows as any)?.count ?? undefined;
+      // Fallback: if cannot get exact count, check if no other is_next exists
+      let shouldMark = false;
+      if (typeof total === 'number') {
+        shouldMark = total === 1;
+      } else {
+        const { data: anyNext } = await admin
+          .from('video_plans')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('channel_id', ctx.channelMeta.id)
+          .eq('is_next', true)
+          .maybeSingle();
+        shouldMark = !anyNext;
+      }
+      if (shouldMark) {
+        await admin
+          .from('video_plans')
+          .update({ is_next: true })
+          .eq('id', planRows.id);
+        // Update cached bundle in-place if present; avoid full rebuild
+        const cached = await getCachedContextBundle(ctx.channelMeta.id);
+        if (cached) {
+          await patchNeriaContextNextVideo(ctx.channelMeta.id, {
+            title: insertPayload.title,
+            planId: planRows.id,
+            hasThumbnail: false,
+            hasOutline: false,
+          });
+        } else {
+          await invalidateNeriaContextCache(ctx.channelMeta.id);
+        }
+      }
+    } catch {}
 
     return NextResponse.json({ planId: planRows.id });
   } catch (error) {
@@ -104,7 +148,7 @@ export async function GET(request: Request) {
     if (id) {
       const { data: plan, error } = await supabase
         .from("video_plans")
-        .select("id, title, summary, created_at, updated_at, channel_id, idea_id, thumbnail_url, thumbnail_selected_at")
+        .select("id, title, summary, created_at, updated_at, channel_id, idea_id, thumbnail_url, thumbnail_selected_at, is_next")
         .eq("id", id)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -125,7 +169,7 @@ export async function GET(request: Request) {
 
     const { data: plans, error: listErr } = await supabase
       .from("video_plans")
-      .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at")
+      .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at, is_next")
       .eq("user_id", user.id)
       .eq("channel_id", ch.id)
       .order("created_at", { ascending: false });
@@ -140,21 +184,109 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   try {
-    const { id, thumbnail_url } = await request.json();
+    const { id, thumbnail_url, mark_next } = await request.json();
     if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
 
+    // If mark_next requested, ensure only this plan is_next within user+channel
+    if (mark_next === true) {
+      // Fetch channel_id for this plan
+      const { data: planRow, error: planErr } = await supabase
+        .from('video_plans')
+        .select('id, channel_id, title, thumbnail_url')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (planErr || !planRow) return NextResponse.json({ error: 'Plan not found' }, { status: 404 });
+
+      // Clear existing next in same user+channel
+      await supabase
+        .from('video_plans')
+        .update({ is_next: false })
+        .eq('user_id', user.id)
+        .eq('channel_id', planRow.channel_id)
+        .eq('is_next', true);
+
+      // Set this plan as next
+      await supabase
+        .from('video_plans')
+        .update({ is_next: true })
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      // Update cached bundle in-place if present; avoid full rebuild
+      const cached = await getCachedContextBundle(planRow.channel_id);
+      if (cached) {
+        // Check outline status
+        let hasOutline = false;
+        try {
+          const { data: script } = await supabase
+            .from('scripts')
+            .select('id')
+            .eq('video_plan_id', id)
+            .maybeSingle();
+          hasOutline = !!script?.id;
+        } catch {}
+        await patchNeriaContextNextVideo(planRow.channel_id, {
+          title: planRow.title || '',
+          planId: id,
+          hasThumbnail: !!planRow.thumbnail_url,
+          hasOutline,
+        });
+      } else {
+        await invalidateNeriaContextCache(planRow.channel_id);
+      }
+    }
+
+    if (thumbnail_url !== undefined) {
+      const { data, error } = await supabase
+        .from('video_plans')
+        .update({ thumbnail_url, thumbnail_selected_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .select('id, title, thumbnail_url, thumbnail_selected_at, is_next, channel_id')
+        .single();
+      if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+      
+      // Update Neria's context if this is the next video
+      if (data?.is_next && data?.channel_id) {
+        try {
+          // Check if this plan has an outline
+          let hasOutline = false;
+          try {
+            const { data: script } = await supabase
+              .from('scripts')
+              .select('id')
+              .eq('video_plan_id', id)
+              .eq('status', 'ready')
+              .maybeSingle();
+            hasOutline = !!script?.id;
+          } catch {}
+          
+          await patchNeriaContextNextVideo(data.channel_id, {
+            title: data.title || '',
+            planId: id,
+            hasThumbnail: !!data.thumbnail_url,
+            hasOutline,
+          });
+        } catch (err) {
+          console.error('[VideoPlans] Failed to update Neria context after thumbnail update:', err);
+        }
+      }
+      
+      return NextResponse.json({ plan: data });
+    }
+
     const { data, error } = await supabase
       .from('video_plans')
-      .update({ thumbnail_url, thumbnail_selected_at: new Date().toISOString() })
+      .select('id, thumbnail_url, thumbnail_selected_at, is_next')
       .eq('id', id)
       .eq('user_id', user.id)
-      .select('id, thumbnail_url, thumbnail_selected_at')
-      .single();
-    if (error) return NextResponse.json({ error: 'Update failed' }, { status: 500 });
+      .maybeSingle();
+    if (error || !data) return NextResponse.json({ error: 'Update failed' }, { status: 500 });
     return NextResponse.json({ plan: data });
   } catch (e) {
     console.error('Update video plan error:', e);

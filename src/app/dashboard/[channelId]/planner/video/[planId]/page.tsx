@@ -11,7 +11,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
 
   const { data: plan } = await supabase
     .from("video_plans")
-    .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at, channel_id")
+    .select("id, title, summary, created_at, updated_at, thumbnail_url, thumbnail_selected_at, channel_id, is_next")
     .eq("id", planId)
     .eq("user_id", user!.id)
     .maybeSingle();
@@ -37,7 +37,14 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
       <div className="relative">
         <div className="grid grid-cols-[380px_1fr] gap-[50px]">
           <div className="bg-white rounded-lg overflow-hidden max-w-[380px]">
-            <ThumbnailPicker thumbnailUrl={(plan as any)?.thumbnail_url || null} />
+            <div className="relative">
+              <ThumbnailPicker thumbnailUrl={(plan as any)?.thumbnail_url || null} />
+              {(plan as any)?.is_next && (
+                <div className="absolute top-2 left-2 px-2 py-1 rounded bg-black/80 text-white text-[10px] font-bold tracking-wide">
+                  NEXT VIDEO
+                </div>
+              )}
+            </div>
             <div className="p-4 flex items gap-4">
               <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
                 {avatarUrl ? (

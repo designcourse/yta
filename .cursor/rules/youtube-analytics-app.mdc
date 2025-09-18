@@ -160,6 +160,36 @@ When examining database schema with Supabase MCP:
 
 This context document should guide all development decisions and ensure consistency across the YouTube Analytics App codebase.
 
+## Feature: Neria Coaching System
+
+### Overview
+Comprehensive AI-powered coaching system that provides data-driven video optimization recommendations based on comparable baselines and KPI analysis.
+
+### Core Features Implemented
+- **Baseline Engine**: Creator-specific comparable sets with rolling median + IQR for CTR, AVD, VPH, WTPI, SVR metrics
+- **Latest Video Analyzer**: Real-time KPI analysis with T+1h early rescue and T+24h verdict system
+- **Coaching Actions**: AI-generated "Next Experiment" proposals with lever-based recommendations (CTR/retention/topic/format)
+- **Hypothesis Backlog**: Experiment tracking with outcomes and win rate analysis by lever
+- **My Goals Weights**: Customizable Growth/Monetization/Community/Shorts priorities affecting thresholds
+- **Competitors Intelligence**: Public competitor analysis for cold-start priors and topic opportunities
+- **Trendlines & Health**: WTPI/AVD/VPH trends with win rate summaries by topic/length
+- **Rescue Notifications**: Server-side T+1h threshold monitoring with actionable alerts
+
+### Key APIs & Components
+- `/api/dashboard/kpis`: Baselines, thresholds, verdicts with confidence scoring
+- `/api/latest-video`: Video snapshots with refresh capability
+- `/api/latest-video-insights`: Retention analysis with transcript-based suggestions
+- `/api/experiments`: Hypothesis CRUD with auto-resolved outcomes
+- `/api/goals`: Goal weights affecting experiment priority
+- `/api/competitors`: Competitor management and metrics analysis
+- `LatestVideoClient`, `NeriaContainer`, `ExperimentsBacklog` components
+
+### Analytics Philosophy
+- Deterministic analytics compute metrics; LLMs interpret and coach based on provided numbers only
+- One primary experiment per upload to reduce confounds
+- Confidence badges based on sample size, variance, recency
+- Grounded recommendations with traceability to source data
+
 ## Feature: Collection system (/collection)
 
 ### Overview
@@ -381,3 +411,91 @@ npm run dashboard
 Notes:
 - The fresh-login script uses `set PLAYWRIGHT_FRESH_PROFILE=1 && ...` for Windows.
 - A persistent profile is used behind the scenes to reduce Google anti-automation friction; the fresh profile flag bypasses existing cookies.
+
+## Feature: Enhanced Neria Context Integration
+
+### Overview
+- File: `src/utils/neria-context.ts`
+- Purpose: Provide Neria with comprehensive, always-available analytics context during chat conversations
+- Integration: Automatically injected into all Neria chat and debug-context API calls
+
+### Context Bundle Components
+The context aggregator pulls data from multiple API endpoints and formats it into a compact, token-efficient bundle:
+
+1. **KPIs vs Baselines** (from `/api/dashboard/kpis`)
+   - Comparable set metadata (format, length band, topic cluster, confidence)
+   - Baseline summaries (median + IQR for CTR, AVD, VPD, retention)
+   - Current performance metrics vs baselines
+   - Pass/fail verdicts per metric
+   - User's weighted goals (growth, monetization, community, shorts)
+
+2. **Retention Insights** (from `/api/latest-video-insights`)
+   - Hook excerpt from video transcript
+   - Top 3 retention improvement tips with timestamps and suggestions
+   - Specific, actionable recommendations based on retention curves
+
+3. **Latest Experiment** (from `/api/experiments`)
+   - Current experiment lever (CTR, retention, topic, format)
+   - Hypothesis and step count
+   - 24-hour outcome if available
+   - Experiment tracking for systematic improvement
+
+4. **Competitor Intelligence** (from `/api/competitors/metrics`)
+   - Competitor channel names (up to 5)
+   - Average VPD across competitor set
+   - Top topic opportunities with performance metrics
+   - **Competitor video titles** (up to 6 recent top performers)
+   - Sample size and confidence indicators
+
+### Caching Strategy
+- **TTL**: 45 minutes to reduce API call volume
+- **Storage**: `neria_context` table with RLS policies
+- **Cache Key**: Per-channel basis using internal channel UUID
+- **Invalidation**: Time-based expiration, refreshes on next request
+
+### System Prompt Integration
+The context bundle is automatically appended as a second system message in both chat and debug routes:
+
+```
+CONTEXT BUNDLE (facts only)
+Refreshed: 2025-01-18T10:30:00.000Z
+Comparable Set: count=18, format=long, lengthBand=3-6min, topic=design, confidence=high
+Baselines: ctr_24h(median=4.20, iqr=1.50), avd_24h(median=180.00, iqr=45.00)...
+Current: CTR=n/a, AVD=152s, VPD=1863, Retention%=9.36
+Verdicts: CTR=n/a, AVD=fail, VPD=neutral, Retention=fail
+Goals Weights: growth=8, monetization=6, community=4, shorts=3
+Hook Excerpt: Every developer needs to learn this, now...
+Retention Tips: @15s (85%): Add visual example | @45s (65%): Clarify main concept
+Next Experiment: lever=retention, steps=3, outcome_24h=pending
+Hypothesis: Improve first 30s hook with concrete value promise
+Competitor Analysis (sample=156, avgVPD≈195, channels: DesignCourse, Flux, AJ&Smart): 
+  ui design (avgVPD 220.5, n=45); figma (avgVPD 198.2, n=32)
+Competitor Video Titles (recent top performers from similar channels): 
+  FULL UI Design Mobile Apps Course | Designers thinking in code is a superpower...
+
+GUARDRAILS:
+- Use only the numbers provided above; do not invent metrics.
+- Do not speculate on competitor private metrics (CTR, retention, impressions).
+- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.
+- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.
+- You can use competitor video titles as inspiration for generating similar content ideas.
+```
+
+### Key Features
+- **Always Available**: Context persists across all chat interactions
+- **Token Efficient**: Summarized data with median/IQR instead of full arrays
+- **Actionable**: Includes specific verdicts, experiments, and competitor insights
+- **Grounded**: Explicit guardrails prevent hallucination of metrics
+- **User-Aware**: Incorporates user's weighted goals and current strategy
+
+### API Integration Points
+- `src/app/api/neria/chat/route.ts`: Main chat endpoint with context injection
+- `src/app/api/neria/debug-context/route.ts`: Debug view with same context bundle
+- Both routes use identical context loading and formatting logic
+
+### Implementation Files
+- `src/utils/neria-context.ts`: Core aggregator and formatter
+- Context integrated into existing Neria chat system without breaking changes
+- Maintains backward compatibility with existing chat functionality
+
+This enhancement ensures Neria has comprehensive, real-time access to channel analytics, competitor intelligence, and user goals during every conversation, enabling more informed and personalized coaching recommendations.

@@ -63,6 +63,7 @@ const NeriaContainer: React.FC = () => {
   const [threadId, setThreadId] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<Array<{ id: string; role: string; content: string; created_at: string }>>([]);
   const [nextExperiment, setNextExperiment] = useState<null | { lever: string; hypothesis: string; steps: string[]; savedId?: string }>(null);
+  const [nextVideoHint, setNextVideoHint] = useState<null | { title: string; hasOutline: boolean; hasThumbnail: boolean; planId: string }>(null);
   const [experimentLoading, setExperimentLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(false);
   const [inputValue, setInputValue] = useState("");
@@ -126,6 +127,84 @@ const NeriaContainer: React.FC = () => {
       } catch {}
       finally {
         setExperimentLoading(false);
+      }
+    })();
+  }, [currentChannelId]);
+
+  // Listen for planner marking a next video and show a guidance card
+  useEffect(() => {
+    const handler = async (e: any) => {
+      try {
+        console.log('[Neria] Next video event received:', e?.detail);
+        const title = e?.detail?.title || '';
+        const evtChannelId = e?.detail?.channelId || currentChannelId;
+        // Fetch latest plans to check outline/thumbnail status of the next plan
+        if (!evtChannelId) {
+          console.log('[Neria] No channelId available for next video event');
+          return;
+        }
+        const plansRes = await fetch(`/api/video-plans?channelId=${encodeURIComponent(evtChannelId)}`);
+        if (!plansRes.ok) return;
+        const pj = await plansRes.json();
+        const next = (pj?.plans || []).find((p: any) => p?.is_next);
+        if (next) {
+          // Determine outline status via scripts API
+          let hasOutline = false;
+          try {
+            const sRes = await fetch(`/api/scripts?planId=${encodeURIComponent(next.id)}`);
+            if (sRes.ok) {
+              const sj = await sRes.json();
+              hasOutline = !!(sj?.script && Array.isArray(sj?.script?.sections) && sj.script.sections.length > 0);
+            }
+          } catch {}
+          console.log('[Neria] Setting next video hint:', { title: title || next.title, hasOutline, hasThumbnail: !!next.thumbnail_url, planId: next.id });
+          setNextVideoHint({ title: title || next.title, hasOutline, hasThumbnail: !!next.thumbnail_url, planId: next.id });
+        } else {
+          console.log('[Neria] No next video found in plans');
+        }
+      } catch (err) {
+        console.error('[Neria] Error handling next video event:', err);
+      }
+    };
+    window.addEventListener('neria-next-video-updated', handler as EventListener);
+    return () => window.removeEventListener('neria-next-video-updated', handler as EventListener);
+  }, [currentChannelId]);
+
+  // Check for next video on mount AND when channel changes
+  useEffect(() => {
+    if (!currentChannelId) return;
+    
+    // Always check for next video when component mounts or channel changes
+    (async () => {
+      try {
+        console.log('[Neria] Checking for next video on mount/channel change');
+        const plansRes = await fetch(`/api/video-plans?channelId=${encodeURIComponent(currentChannelId)}`);
+        if (!plansRes.ok) {
+          console.log('[Neria] Failed to fetch plans');
+          return;
+        }
+        const pj = await plansRes.json();
+        const next = (pj?.plans || []).find((p: any) => p?.is_next);
+        if (!next) {
+          console.log('[Neria] No next video found');
+          setNextVideoHint(null);
+          return;
+        }
+        
+        // Check if it has an outline
+        let hasOutline = false;
+        try {
+          const sRes = await fetch(`/api/scripts?planId=${encodeURIComponent(next.id)}`);
+          if (sRes.ok) {
+            const sj = await sRes.json();
+            hasOutline = !!(sj?.script && Array.isArray(sj?.script?.sections) && sj.script.sections.length > 0);
+          }
+        } catch {}
+        
+        console.log('[Neria] Found next video on mount:', { title: next.title, hasOutline, hasThumbnail: !!next.thumbnail_url, planId: next.id });
+        setNextVideoHint({ title: next.title, hasOutline, hasThumbnail: !!next.thumbnail_url, planId: next.id });
+      } catch (err) {
+        console.error('[Neria] Error checking for next video:', err);
       }
     })();
   }, [currentChannelId]);
@@ -754,8 +833,8 @@ const NeriaContainer: React.FC = () => {
                   />
                 )}
                 
-                {/* Admin Debug Button */}
-                {isAdmin && threadId && currentChannelId && (
+                {/* Debug Button (force-show in dev) */}
+                {(((process.env.NODE_ENV !== 'production') || isAdmin) && threadId && currentChannelId) && (
                   <button
                     onClick={() => {
                       console.log('Debug button clicked:', { threadId, currentChannelId, isAdmin });
@@ -857,6 +936,45 @@ const NeriaContainer: React.FC = () => {
                     )}
                   </div>
                 ))}
+                {/* Next Video Hint Card - appears as last message */}
+                {nextVideoHint && (
+                  <div className="max-w-[85%]">
+                    <div className="p-4 rounded-md" style={{ backgroundColor: '#2a2c3a', border: '1px solid rgba(255,255,255,0.12)' }}>
+                      <div className="text-white text-sm opacity-80 mb-1">Next Video</div>
+                      <div className="text-white text-base font-medium mb-2">{nextVideoHint.title}</div>
+                      <div className="text-white/90 text-sm">
+                        {(!nextVideoHint.hasOutline && !nextVideoHint.hasThumbnail) && (
+                          <span>I see you chose a topic for your next video! Head over to the planner to generate a script outline and choose a thumbnail.</span>
+                        )}
+                        {(nextVideoHint.hasOutline && !nextVideoHint.hasThumbnail) && (
+                          <span>Your script outline is ready! Finish by choosing a thumbnail in the planner.</span>
+                        )}
+                        {(!nextVideoHint.hasOutline && nextVideoHint.hasThumbnail) && (
+                          <span>Your thumbnail is selected! Want me to generate a script outline now?</span>
+                        )}
+                        {(nextVideoHint.hasOutline && nextVideoHint.hasThumbnail) && (
+                          <span>Both script outline and thumbnail are ready. You're all set for recording!</span>
+                        )}
+                      </div>
+                      <div className="mt-3 flex flex-col gap-2">
+                        <button
+                          className="px-3 py-2 text-sm rounded-md font-semibold"
+                          style={{ backgroundColor: '#3086ff', color: '#fff' }}
+                          onClick={() => {
+                            try {
+                              const url = `/dashboard/${encodeURIComponent(currentChannelId || '')}/planner/video/${encodeURIComponent(nextVideoHint.planId)}`;
+                              window.location.assign(url);
+                            } catch {}
+                          }}
+                        >Open Planner</button>
+                        <button
+                          className="px-3 py-2 text-sm rounded-md font-semibold text-white/80 hover:text-white"
+                          onClick={() => setNextVideoHint(null)}
+                        >Dismiss</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
                 
                 {/* Approval action - single CTA */}

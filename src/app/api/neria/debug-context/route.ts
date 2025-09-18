@@ -45,7 +45,7 @@ async function countTokens(messages: Array<{ role: string; content: string }>, m
     console.log(`Accurate token count: ${totalTokens}`);
     return totalTokens;
   } catch (error) {
-    console.warn('Failed to use tiktoken, falling back to character-based estimation:', error);
+    // Quiet fallback (debug tool should not spam logs)
     // Fallback: rough estimation (1 token ≈ 4 characters for English text)
     const estimatedTokens = Math.ceil(totalChars / 4);
     console.log(`Estimated token count: ${estimatedTokens}`);
@@ -312,7 +312,7 @@ export async function POST(request: Request) {
         if (bundleText) {
         messages.push({
           role: 'system',
-          content: `${bundleText}\n\nGUARDRAILS:\n- Use only the numbers provided above; do not invent metrics.\n- Do not speculate on competitor private metrics (CTR, retention, impressions).\n- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.\n- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.\n- You can use competitor video titles as inspiration for generating similar content ideas.`
+          content: `${bundleText}\n\nGUARDRAILS:\n- Use only the numbers provided above; do not invent metrics.\n- Do not speculate on competitor private metrics (CTR, retention, impressions).\n- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.\n- When users ask about \"competitor titles\" or \"similar to competitors\", reference the Competitor Video Titles listed above.\n- You can use competitor video titles as inspiration for generating similar content ideas.\n- If NEXT VIDEO is not set, briefly encourage the user to choose or create their next video and offer to help with ideas. Do not repeat this in every message; mention sparingly.\n- If NEXT VIDEO is set but thumbnail or outline is pending, prioritize helping complete those steps.`
         });
         }
       }
