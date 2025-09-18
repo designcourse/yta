@@ -305,7 +305,7 @@ async function shouldUseRealtimeSearch(message: string): Promise<{ needsSearch: 
         {
           role: 'system',
           content:
-            'You are Neria. Decide if the user query requires real-time web search (news, latest releases, current events, very recent data). Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
+            'You are Neria. Decide if the user query requires real-time web search for very recent data (breaking news, product releases in last few days, current events). Do NOT trigger search for general "trends" or "latest" requests that could be answered with existing cached trend data. Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
         },
         { role: 'user', content: message },
       ],
@@ -362,7 +362,7 @@ async function fetchVerifiedRecentMetalSongs(userRequest: string): Promise<Array
     const yearMatch = userRequest.match(/20\d{2}/);
     const year = yearMatch ? yearMatch[0] : String(new Date().getFullYear());
 
-    const messages = [
+    const messages: Array<{ role: 'system' | 'user'; content: string }> = [
       {
         role: 'system',
         content:
@@ -734,6 +734,27 @@ async function generateVideoIdeas(supabase: any, userId: string, channelId: stri
     const client = getClient(modelConfig.provider);
     let prompt = buildVideoTitlePrompt(context);
     
+    // Add trends context if available and user is asking for trends
+    const isAskingAboutTrends = /\b(trend|trending|latest)\b/i.test(customPrompt || "");
+    if (isAskingAboutTrends) {
+      try {
+        const { data: trends } = await supabase
+          .from('trends')
+          .select('title, url, source')
+          .eq('channel_id', internalChannelId)
+          .eq('user_id', userId)
+          .order('score', { ascending: false })
+          .limit(10);
+        if (trends && trends.length > 0) {
+          const trendsText = trends.map((t: any) => `- [${t.source}] ${t.title}`).join('\n');
+          prompt += `\n\nLATEST TRENDS (use these as inspiration, adapt for your channel's niche):\n${trendsText}\n\nWhen using trends, reframe and adapt the concepts to fit the channel's style and audience.`;
+          console.log('[Neria][VideoIdeas] Added trends context to prompt:', trends.length, 'trends');
+        }
+      } catch (e) {
+        console.warn('[Neria][VideoIdeas] Failed to load trends:', e);
+      }
+    }
+    
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
     if (customPrompt) {
       prompt += `\n\nUSER'S SPECIFIC REQUEST: "${customPrompt}"
@@ -744,6 +765,14 @@ Please generate titles that specifically address this request while still follow
     // fetch verifiable context from Perplexity and constrain the title generation to those facts.
     try {
       let decision = await shouldUseRealtimeSearch(customPrompt || "");
+      
+      // Skip real-time search if user is asking about trends - let the system use cached trends instead
+      const isAskingAboutTrends = /\b(trend|trending|latest)\b/i.test(customPrompt || "");
+      if (decision.needsSearch && isAskingAboutTrends) {
+        console.log('[Neria][VideoIdeas] Skipping search for trends request - will use context trends');
+        decision = { needsSearch: false, query: decision.query };
+      }
+      
       if (decision?.needsSearch && decision.query) {
         const normalized = normalizeRelativeTimeInQuery(decision.query);
         if (normalized !== decision.query) {
@@ -1076,7 +1105,7 @@ export async function POST(request: Request) {
             // If user is not on planner page, send link message but continue to generate titles
             if (!isOnPlannerPage && intent.requiresRedirect && intent.targetUrl) {
               console.log('User not on planner page, sending planner link');
-              const plannerUrl = `/dashboard/${pinned.channelMeta.externalId}/planner`;
+              const plannerUrl = `/dashboard/${pinned.channelMeta?.externalId || 'unknown'}/planner`;
               const promptParam = body.message ? `?prompt=${encodeURIComponent(body.message)}` : '';
               const fullPlannerUrl = plannerUrl + promptParam;
               const linkMessage = `I’ll generate the titles now. You can view and manage them in the [Video Planner](${fullPlannerUrl}).`;
@@ -1113,7 +1142,7 @@ export async function POST(request: Request) {
               })}\n\n`));
               
               // Generate video ideas in background
-              const success = await generateVideoIdeas(supabase, user.id, pinned.channelMeta.externalId, body.message);
+              const success = await generateVideoIdeas(supabase, user.id, pinned.channelMeta?.externalId || '', body.message);
               
               if (success) {
                 // Send video generation complete event
@@ -1296,6 +1325,15 @@ export async function POST(request: Request) {
     // Optional: real-time research step
     let research: { content: string; sources?: string[] } | null = null;
     let realtimeDecision = await shouldUseRealtimeSearch(body.message);
+    
+    // Skip real-time search if user is asking about trends and we already have trends in context
+    const hasTrendsInContext = bundleText && bundleText.includes('Trends (last updated:');
+    const isAskingAboutTrends = /\b(trend|trending|latest)\b/i.test(body.message);
+    if (realtimeDecision.needsSearch && hasTrendsInContext && isAskingAboutTrends) {
+      console.log('[Neria][Realtime] Skipping search - trends already available in context');
+      realtimeDecision = { needsSearch: false, query: realtimeDecision.query };
+    }
+    
     // Normalize relative-time phrases in the detected query to reflect the actual current date
     if (realtimeDecision?.needsSearch && realtimeDecision.query) {
       const normalized = normalizeRelativeTimeInQuery(realtimeDecision.query);
