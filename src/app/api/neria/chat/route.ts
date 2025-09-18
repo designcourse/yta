@@ -5,6 +5,7 @@ import { getClient, getCurrentModel } from "@/utils/openai";
 import { logAi } from "@/utils/logging";
 import { getValidAccessToken } from "@/utils/googleAuth";
 import { getPrompt } from "@/utils/prompts";
+import { buildNeriaContextBundle, formatBundleForSystemPrompt } from "@/utils/neria-context";
 
 // Normalize relative time expressions (e.g., "this year") to absolute dates for search queries
 function normalizeRelativeTimeInQuery(text: string): string {
@@ -1216,14 +1217,38 @@ export async function POST(request: Request) {
       }
     }
 
-            // Get current model configuration
+    // Get current model configuration
         const modelConfig = await getCurrentModelWithSupabase(supabase);
+
+    // Build base system prompt
     const systemPrompt = await buildSystemPrompt(pinned);
+
+    // Build enriched analytics context bundle (facts only), with cache
+    let bundleText: string | null = null;
+    try {
+      if (pinned.channelId && pinned.channelMeta?.externalId) {
+        const bundle = await buildNeriaContextBundle({
+          request,
+          channelExternalId: pinned.channelMeta.externalId,
+          internalChannelId: pinned.channelId,
+        });
+        bundleText = formatBundleForSystemPrompt(bundle);
+      }
+    } catch (e) {
+      console.warn('[Neria][ContextBundle] Failed to build bundle:', e);
+    }
+
     const history = await loadRecentMessages(supabase, threadId);
 
     // Assemble messages with proper alternation; GPT-4o is the primary chat model
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
     messages.push({ role: "system", content: systemPrompt });
+    if (bundleText) {
+      messages.push({
+        role: 'system',
+        content: `${bundleText}\n\nGUARDRAILS:\n- Use only the numbers provided above; do not invent metrics.\n- Do not speculate on competitor private metrics (CTR, retention, impressions).\n- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.\n- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.\n- You can use competitor video titles as inspiration for generating similar content ideas.`
+      });
+    }
     
     // Filter history to ensure proper user/assistant alternation
     const filteredHistory: Array<{ role: string; content: string }> = [];

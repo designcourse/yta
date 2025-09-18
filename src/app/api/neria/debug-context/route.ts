@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { createSupabaseAdminClient } from '@/utils/supabase/admin';
 import { getPrompt } from '@/utils/prompts';
 import { getValidAccessToken } from '@/utils/googleAuth';
+import { buildNeriaContextBundle, formatBundleForSystemPrompt } from '@/utils/neria-context';
 
 // Simple token counting function (approximation)
 async function countTokens(messages: Array<{ role: string; content: string }>, model: string): Promise<number> {
@@ -117,7 +118,7 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
     .single();
 
   if (threadError || !thread?.channel_id) {
-    return { channelMeta: null, memoryProfile: null, statsSummary: null, aboutText: "", recentTitles: [], strategyPlan: null };
+    return { channelId: null, channelMeta: null, memoryProfile: null, statsSummary: null, aboutText: "", recentTitles: [], strategyPlan: null };
   }
 
   const channelUuid = thread.channel_id;
@@ -241,6 +242,7 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
   const strategyPlan = strategyRows?.[0]?.strategy_content || null;
 
   return {
+    channelId: channelUuid,
     channelMeta: channelMeta ? { title: channelMeta.title, externalId: channelMeta.channel_id } : null,
     memoryProfile,
     statsSummary,
@@ -297,6 +299,26 @@ export async function POST(request: Request) {
     // Assemble messages like in the chat route
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
     messages.push({ role: "system", content: systemPrompt });
+    // Enriched analytics context bundle (facts only), mirror chat route behavior
+    // Only build bundle if not recently cached to avoid heavy API calls:
+    try {
+      if (pinned?.channelMeta?.externalId && pinned?.channelId) {
+        const bundle = await buildNeriaContextBundle({
+          request,
+          channelExternalId: pinned.channelMeta.externalId,
+          internalChannelId: pinned.channelId,
+        });
+        const bundleText = formatBundleForSystemPrompt(bundle);
+        if (bundleText) {
+        messages.push({
+          role: 'system',
+          content: `${bundleText}\n\nGUARDRAILS:\n- Use only the numbers provided above; do not invent metrics.\n- Do not speculate on competitor private metrics (CTR, retention, impressions).\n- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.\n- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.\n- You can use competitor video titles as inspiration for generating similar content ideas.`
+        });
+        }
+      }
+    } catch (e) {
+      console.warn('[Neria][DebugContext] Failed to load context bundle:', e);
+    }
     
     // Filter history to ensure proper user/assistant alternation
     const filteredHistory: Array<{ role: string; content: string }> = [];
