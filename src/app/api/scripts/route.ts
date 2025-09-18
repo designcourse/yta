@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { getClient } from "@/utils/openai";
 import { getPrompt } from "@/utils/prompts";
-import { patchNeriaContextNextVideo } from "@/utils/neria-context";
+import { patchNeriaContextNextVideo, invalidateNeriaContextForScript } from "@/utils/neria-context";
 
 type GenerateBody = {
   planId: string;
@@ -231,13 +231,18 @@ export async function POST(request: Request) {
         .eq("id", body.planId)
         .maybeSingle();
       
-      if (planCheck?.is_next && planCheck?.channel_id) {
-        await patchNeriaContextNextVideo(planCheck.channel_id, {
-          title: planCheck.title || '',
-          planId: planCheck.id,
-          hasThumbnail: !!planCheck.thumbnail_url,
-          hasOutline: true, // Script was just generated successfully
-        });
+      if (planCheck?.channel_id) {
+        // Always invalidate context cache when script is created to ensure fresh script content
+        await invalidateNeriaContextForScript(planCheck.channel_id);
+        
+        if (planCheck.is_next) {
+          await patchNeriaContextNextVideo(planCheck.channel_id, {
+            title: planCheck.title || '',
+            planId: planCheck.id,
+            hasThumbnail: !!planCheck.thumbnail_url,
+            hasOutline: true, // Script was just generated successfully
+          });
+        }
       }
     } catch (err) {
       console.error('[Scripts] Failed to update Neria context after script generation:', err);

@@ -447,11 +447,18 @@ The context aggregator pulls data from multiple API endpoints and formats it int
    - **Competitor video titles** (up to 6 recent top performers)
    - Sample size and confidence indicators
 
+5. **Next Video Status** (from `/api/video-plans` and `/api/scripts`)
+   - Current "next video" title and plan ID
+   - Thumbnail completion status (`hasThumbnail`)
+   - Script/outline completion status (`hasOutline`)
+   - Real-time updates when scripts generated or thumbnails chosen
+
 ### Caching Strategy
 - **TTL**: 45 minutes to reduce API call volume
 - **Storage**: `neria_context` table with RLS policies
 - **Cache Key**: Per-channel basis using internal channel UUID
 - **Invalidation**: Time-based expiration, refreshes on next request
+- **Targeted Updates**: `patchNeriaContextNextVideo()` updates only next video section without full rebuild
 
 ### System Prompt Integration
 The context bundle is automatically appended as a second system message in both chat and debug routes:
@@ -468,6 +475,7 @@ Hook Excerpt: Every developer needs to learn this, now...
 Retention Tips: @15s (85%): Add visual example | @45s (65%): Clarify main concept
 Next Experiment: lever=retention, steps=3, outcome_24h=pending
 Hypothesis: Improve first 30s hook with concrete value promise
+NEXT VIDEO: Master CSS in Just 10 Minutes! [thumbnail=ready, outline=ready]
 Competitor Analysis (sample=156, avgVPD≈195, channels: DesignCourse, Flux, AJ&Smart): 
   ui design (avgVPD 220.5, n=45); figma (avgVPD 198.2, n=32)
 Competitor Video Titles (recent top performers from similar channels): 
@@ -487,15 +495,93 @@ GUARDRAILS:
 - **Actionable**: Includes specific verdicts, experiments, and competitor insights
 - **Grounded**: Explicit guardrails prevent hallucination of metrics
 - **User-Aware**: Incorporates user's weighted goals and current strategy
+- **Real-time Updates**: Next video status updates immediately when scripts/thumbnails change
 
 ### API Integration Points
 - `src/app/api/neria/chat/route.ts`: Main chat endpoint with context injection
 - `src/app/api/neria/debug-context/route.ts`: Debug view with same context bundle
+- `src/app/api/scripts/route.ts`: Updates context when script generated
+- `src/app/api/video-plans/route.ts`: Updates context when thumbnail chosen or next video marked
 - Both routes use identical context loading and formatting logic
 
 ### Implementation Files
-- `src/utils/neria-context.ts`: Core aggregator and formatter
+- `src/utils/neria-context.ts`: Core aggregator and formatter with caching and patch functions
 - Context integrated into existing Neria chat system without breaking changes
 - Maintains backward compatibility with existing chat functionality
 
-This enhancement ensures Neria has comprehensive, real-time access to channel analytics, competitor intelligence, and user goals during every conversation, enabling more informed and personalized coaching recommendations.
+This enhancement ensures Neria has comprehensive, real-time access to channel analytics, competitor intelligence, user goals, and next video planning status during every conversation, enabling more informed and personalized coaching recommendations.
+
+## Feature: Next Video Planning System
+
+### Overview
+- Database: `video_plans` table with `is_next` boolean column
+- Purpose: Keep creators focused on completing their next planned video
+- Integration: Neria's context, planner UI, and real-time guidance cards
+
+### Core Functionality
+
+#### Next Video Selection
+- **Automatic**: First video plan created is automatically marked as `is_next=true`
+- **Manual**: 3-dot menu in planner allows "Mark as next video" action
+- **Unique**: Only one video per channel can be marked as next at a time
+- **Visual**: "NEXT VIDEO" tag displayed on thumbnail container upper-left
+
+#### Completion Tracking
+- **Script Status**: Checks `scripts` table for `status='ready'` entries
+- **Thumbnail Status**: Checks `video_plans.thumbnail_url` field
+- **Real-time Updates**: Context updated immediately when script generated or thumbnail chosen
+
+#### Neria Integration
+- **Context Bundle**: Always includes next video status in `NEXT VIDEO` line
+- **Guidance Card**: Dynamic card in chat showing completion status and next actions
+- **Intent Analysis**: "What's my next video?" queries answered from context
+
+### UI Components
+
+#### Planner Interface (`src/components/PlannerClient.tsx`)
+- **3-dot Menu**: `PlanMenu` component with "Mark as next video" option
+- **Visual Tag**: "NEXT VIDEO" badge on saved plan cards
+- **Event Dispatch**: Triggers `neria-next-video-updated` custom event
+
+#### Next Video Card (`src/components/NeriaContainer.tsx`)
+- **Dynamic Messages**: Context-aware guidance based on completion status
+  - No script + no thumbnail: "Head over to the planner to generate a script outline and choose a thumbnail"
+  - Script only: "Your script outline is ready! Finish by choosing a thumbnail"  
+  - Thumbnail only: "Your thumbnail is selected! Want me to generate a script outline now?"
+  - Both complete: "You're all set for recording!"
+- **Action Buttons**: "Open Planner" (links to specific video page) and "Dismiss"
+- **Vertical Layout**: Buttons stacked for better mobile UX
+
+### API Integration
+
+#### Context Updates (`src/utils/neria-context.ts`)
+- **`patchNeriaContextNextVideo()`**: Efficient updates without full analytics refetch
+- **Cache Management**: Updates only next video section of cached context bundle
+- **Performance**: Avoids expensive YouTube Analytics API calls
+
+#### Script Generation (`src/app/api/scripts/route.ts`)
+- **Post-Generation Hook**: Updates Neria context with `hasOutline: true` 
+- **Conditional Update**: Only updates if plan is marked as next video
+
+#### Thumbnail Selection (`src/app/api/video-plans/route.ts`)
+- **PUT Endpoint**: Updates context when thumbnail chosen for next video
+- **Status Sync**: Ensures context reflects current completion state
+
+#### Intent Analysis (`src/app/api/neria/chat/route.ts`)
+- **Script Requests**: "generate script" classified as `chat_only` to use existing script generation flow
+- **Next Video Queries**: Direct context-based responses for "what's my next video" questions
+
+### User Experience Flow
+1. **Plan Creation**: User clicks video idea → creates plan → automatically marked as next
+2. **Neria Awareness**: Context immediately updated, guidance card appears
+3. **Action Guidance**: Card shows what's needed (script, thumbnail, or both)
+4. **Completion Tracking**: Real-time updates as user completes tasks
+5. **Focus Maintenance**: Neria consistently guides toward completing next video
+
+### Technical Implementation
+- **Database Schema**: `is_next` boolean in `video_plans` table with unique constraint
+- **Event System**: Custom browser events for cross-component communication  
+- **Caching Strategy**: Targeted cache updates prevent expensive API refetches
+- **Context Integration**: Next video status always available in Neria's system prompt
+
+This system keeps creators focused on completing their planned videos while providing intelligent, context-aware guidance through Neria's coaching interface.

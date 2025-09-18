@@ -1252,7 +1252,7 @@ export async function POST(request: Request) {
     if (bundleText) {
       messages.push({
         role: 'system',
-        content: `${bundleText}\n\nGUARDRAILS:\n- Use only the numbers provided above; do not invent metrics.\n- Do not speculate on competitor private metrics (CTR, retention, impressions).\n- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.\n- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.\n- You can use competitor video titles as inspiration for generating similar content ideas.`
+        content: bundleText
       });
     }
     

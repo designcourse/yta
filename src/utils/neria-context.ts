@@ -12,6 +12,16 @@ type ContextBundle = {
     hasThumbnail?: boolean;
     hasOutline?: boolean;
   };
+  script?: {
+    videoTitle?: string;
+    durationMinutes?: number;
+    sections: Array<{
+      position: number;
+      startTime: number;
+      title: string;
+      summary: string;
+    }>;
+  };
   kpis?: {
     videoId: string | null;
     comparable: { count: number; dims: { format?: string | null; lengthBand?: string | null; topicCluster?: string | null }; confidence: string };
@@ -221,7 +231,7 @@ export async function buildNeriaContextBundle(opts: {
     }
   } catch {}
 
-  // Next video status + thumbnail/outline completion
+  // Next video status + thumbnail/outline completion + script content
   try {
     // Fetch plans to identify which one is marked as next
     const pRes = await fetcher(`${origin}/api/video-plans?channelId=${encodeURIComponent(channelExternalId)}`);
@@ -234,11 +244,13 @@ export async function buildNeriaContextBundle(opts: {
       } else {
         // Outline status: check scripts API for this plan
         let hasOutline = false;
+        let scriptData: any = null;
         try {
           const sRes = await fetcher(`${origin}/api/scripts?planId=${encodeURIComponent(next.id)}`);
           if (sRes.ok) {
             const sj = await sRes.json();
             hasOutline = !!(sj?.script && Array.isArray(sj?.script?.sections) && sj.script.sections.length > 0);
+            scriptData = sj?.script;
           }
         } catch {}
 
@@ -249,6 +261,20 @@ export async function buildNeriaContextBundle(opts: {
           hasThumbnail: !!next.thumbnail_url,
           hasOutline,
         };
+
+        // Include script content if available
+        if (scriptData && Array.isArray(scriptData.sections) && scriptData.sections.length > 0) {
+          bundle.script = {
+            videoTitle: String(next.title || ''),
+            durationMinutes: scriptData.duration_seconds ? Math.round(Number(scriptData.duration_seconds) / 60) : undefined,
+            sections: scriptData.sections.map((section: any) => ({
+              position: Number(section.position || 0),
+              startTime: Number(section.start_time_seconds || 0),
+              title: trim(String(section.title || ''), 100) || '',
+              summary: trim(String(section.summary || ''), 300) || '',
+            })),
+          };
+        }
       }
     }
   } catch {}
@@ -323,6 +349,17 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
       lines.push(`NEXT VIDEO: ${nv.title || '(untitled)'} [${steps.join(', ')}]`);
     }
   }
+  // Script content (if available)
+  if (bundle.script && Array.isArray(bundle.script.sections) && bundle.script.sections.length > 0) {
+    lines.push(`SCRIPT OUTLINE: "${bundle.script.videoTitle || 'Untitled'}" (${bundle.script.durationMinutes || 'unknown'} min, ${bundle.script.sections.length} sections)`);
+    bundle.script.sections.forEach((section, index) => {
+      const timeStr = section.startTime > 0 ? `${Math.floor(section.startTime / 60)}:${(section.startTime % 60).toString().padStart(2, '0')}` : '0:00';
+      lines.push(`  ${index + 1}. [${timeStr}] ${section.title}`);
+      if (section.summary) {
+        lines.push(`     ${section.summary}`);
+      }
+    });
+  }
   if (bundle.kpis) {
     const k = bundle.kpis;
     const dims = k.comparable?.dims || {};
@@ -364,6 +401,20 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
       lines.push(`Competitor Video Titles (recent top performers from similar channels): ${titleList}`);
     }
   }
+  
+  // Add guardrails section
+  lines.push('');
+  lines.push('GUARDRAILS:');
+  lines.push('- Use only the numbers provided above; do not invent metrics.');
+  lines.push('- Do not speculate on competitor private metrics (CTR, retention, impressions).');
+  lines.push('- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.');
+  lines.push('- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.');
+  lines.push('- You can use competitor video titles as inspiration for generating similar content ideas.');
+  if (bundle.script && Array.isArray(bundle.script.sections) && bundle.script.sections.length > 0) {
+    lines.push('- When users ask about their script or next video, reference the SCRIPT OUTLINE provided above with specific section titles and summaries.');
+    lines.push('- Provide feedback on script structure, pacing, section content, and timing based on the outlined sections.');
+  }
+  
   return lines.join('\n');
 }
 
@@ -409,6 +460,46 @@ export async function patchNeriaContextNextVideo(internalChannelId: string, next
       hasThumbnail: !!next.hasThumbnail,
       hasOutline: !!next.hasOutline,
     };
+    
+    // If outline is available, fetch and include script content
+    if (next.hasOutline) {
+      try {
+        const { data: scriptData } = await supabase
+          .from("scripts")
+          .select(`
+            id, duration_seconds,
+            script_sections!inner(position, start_time_seconds, title, summary)
+          `)
+          .eq("video_plan_id", next.planId)
+          .eq("status", "ready")
+          .maybeSingle();
+        
+        if (scriptData && Array.isArray(scriptData.script_sections) && scriptData.script_sections.length > 0) {
+          base.script = {
+            videoTitle: next.title,
+            durationMinutes: scriptData.duration_seconds ? Math.round(Number(scriptData.duration_seconds) / 60) : undefined,
+            sections: scriptData.script_sections
+              .sort((a: any, b: any) => (a.position || 0) - (b.position || 0))
+              .map((section: any) => ({
+                position: Number(section.position || 0),
+                startTime: Number(section.start_time_seconds || 0),
+                title: trim(String(section.title || ''), 100) || '',
+                summary: trim(String(section.summary || ''), 300) || '',
+              })),
+          };
+        } else {
+          // Clear script if no valid sections found
+          delete base.script;
+        }
+      } catch {
+        // If script fetch fails, clear script data
+        delete base.script;
+      }
+    } else {
+      // Clear script if outline not available
+      delete base.script;
+    }
+    
     base.refreshedAt = base.refreshedAt || new Date().toISOString();
     // Write back to DB + memory
     await writeCachedBundle(supabase, internalChannelId, base);
@@ -434,6 +525,12 @@ export async function getCachedContextBundle(internalChannelId: string): Promise
     }
   } catch {}
   return null;
+}
+
+export async function invalidateNeriaContextForScript(internalChannelId: string) {
+  // Invalidate context cache when scripts are created/updated
+  // This ensures Neria gets fresh script content in conversations
+  await invalidateNeriaContextCache(internalChannelId);
 }
 
 
