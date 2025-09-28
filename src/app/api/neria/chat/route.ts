@@ -111,18 +111,18 @@ Consider these patterns:
 - "show me planner", "go to planner", "take me to video planner" = navigate_to_planner  
 - "my goals", "set goals", "goal tracking" = navigate_to_goals
 - "how is my channel doing", "show analytics", "performance" = navigate_to_analytics
-- General questions, strategy advice, explanations, asking about topics/trends = chat_only
+- General questions, strategy advice, explanations, asking about topics = chat_only
 
 IMPORTANT: 
 - Only use "generate_video_titles" if the user is EXPLICITLY asking for video title suggestions, video ideas, or content creation help.
 - Script generation requests should use "chat_only" so they go through the normal chat flow which has script generation logic.
-- Questions about topics, trends, or general information should be "chat_only".
+- Questions about topics or general information should be "chat_only".
 
 Examples of "chat_only":
 - "what is the most popular metal track..."
 - "tell me about..."
 - "how do I..."
-- "what are the trends in..."
+- "what are the topics in..."
 - "explain..."
 - "generate a script for this"
 - "write me a script outline"
@@ -305,7 +305,7 @@ async function shouldUseRealtimeSearch(message: string): Promise<{ needsSearch: 
         {
           role: 'system',
           content:
-            'You are Neria. Decide if the user query requires real-time web search for very recent data (breaking news, product releases in last few days, current events). Do NOT trigger search for general "trends" or "latest" requests that could be answered with existing cached trend data. Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
+            'You are Neria. Decide if the user query requires real-time web search for very recent data (breaking news, product releases in last few days, current events). Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
         },
         { role: 'user', content: message },
       ],
@@ -734,26 +734,6 @@ async function generateVideoIdeas(supabase: any, userId: string, channelId: stri
     const client = getClient(modelConfig.provider);
     let prompt = buildVideoTitlePrompt(context);
     
-    // Add trends context if available and user is asking for trends
-    const isAskingAboutTrends = /\b(trend|trending|latest)\b/i.test(customPrompt || "");
-    if (isAskingAboutTrends) {
-      try {
-        const { data: trends } = await supabase
-          .from('trends')
-          .select('title, url, source')
-          .eq('channel_id', internalChannelId)
-          .eq('user_id', userId)
-          .order('score', { ascending: false })
-          .limit(10);
-        if (trends && trends.length > 0) {
-          const trendsText = trends.map((t: any) => `- [${t.source}] ${t.title}`).join('\n');
-          prompt += `\n\nLATEST TRENDS (use these as inspiration, adapt for your channel's niche):\n${trendsText}\n\nWhen using trends, reframe and adapt the concepts to fit the channel's style and audience.`;
-          console.log('[Neria][VideoIdeas] Added trends context to prompt:', trends.length, 'trends');
-        }
-      } catch (e) {
-        console.warn('[Neria][VideoIdeas] Failed to load trends:', e);
-      }
-    }
     
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
     if (customPrompt) {
@@ -766,12 +746,6 @@ Please generate titles that specifically address this request while still follow
     try {
       let decision = await shouldUseRealtimeSearch(customPrompt || "");
       
-      // Skip real-time search if user is asking about trends - let the system use cached trends instead
-      const isAskingAboutTrends = /\b(trend|trending|latest)\b/i.test(customPrompt || "");
-      if (decision.needsSearch && isAskingAboutTrends) {
-        console.log('[Neria][VideoIdeas] Skipping search for trends request - will use context trends');
-        decision = { needsSearch: false, query: decision.query };
-      }
       
       if (decision?.needsSearch && decision.query) {
         const normalized = normalizeRelativeTimeInQuery(decision.query);
@@ -961,7 +935,7 @@ ${strategyPlan}
 REQUIREMENTS:
 1. Generate exactly 6 video title ideas
 2. Make titles compelling, clickable, and aligned with the channel's content
-3. Consider current trends and high-performing patterns
+3. Consider high-performing patterns from your channel
 4. Ensure titles are optimized for YouTube search and discovery
 5. Make each title unique and appealing to the target audience
 6. Keep titles between 40-60 characters for optimal display
@@ -1326,13 +1300,6 @@ export async function POST(request: Request) {
     let research: { content: string; sources?: string[] } | null = null;
     let realtimeDecision = await shouldUseRealtimeSearch(body.message);
     
-    // Skip real-time search if user is asking about trends and we already have trends in context
-    const hasTrendsInContext = bundleText && bundleText.includes('Trends (last updated:');
-    const isAskingAboutTrends = /\b(trend|trending|latest)\b/i.test(body.message);
-    if (realtimeDecision.needsSearch && hasTrendsInContext && isAskingAboutTrends) {
-      console.log('[Neria][Realtime] Skipping search - trends already available in context');
-      realtimeDecision = { needsSearch: false, query: realtimeDecision.query };
-    }
     
     // Normalize relative-time phrases in the detected query to reflect the actual current date
     if (realtimeDecision?.needsSearch && realtimeDecision.query) {
