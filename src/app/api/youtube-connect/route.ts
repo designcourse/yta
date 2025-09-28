@@ -227,6 +227,21 @@ export async function POST(request: Request) {
       }
     } catch {}
 
+    // After adding channels, kick off initial trends fetch for the first channel (best-effort)
+    try {
+      if (channels.length > 0) {
+        const primaryChannelId = channels[0]?.id as string | undefined;
+        if (primaryChannelId) {
+          // Use server-call to trends API with force=true
+          await fetch(`${process.env.NEXT_PUBLIC_SITE_URL || ''}/api/trends`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelId: primaryChannelId, force: true }),
+          }).catch(() => {});
+        }
+      }
+    } catch {}
+
     // Return the channel IDs that were added
     const channelIds = channels.map(channel => channel.id);
     return NextResponse.json({

@@ -48,6 +48,10 @@ type ContextBundle = {
     topicOpportunities: Array<{ keyword: string; avgVpd: number; count: number }>;
     priorBased: true;
   };
+  trends?: {
+    lastUpdated?: string;
+    items: Array<{ title: string; source: string; url: string }>;
+  };
 };
 
 function medianAndIqr(q: any): { median?: number | null; iqr?: number | null } {
@@ -323,6 +327,26 @@ export async function buildNeriaContextBundle(opts: {
     }
   } catch {}
 
+  // Trends (Perplexity + YouTube; 3h TTL)
+  try {
+    const tRes = await fetcher(`${origin}/api/trends?channelId=${encodeURIComponent(channelExternalId)}`);
+    if (tRes.ok) {
+      const tj = await tRes.json();
+      const arr: any[] = Array.isArray(tj?.items) ? tj.items : [];
+      const items = arr.slice(0, 10).map((x: any) => ({
+        title: trim(String(x?.title || ''), 160) || '',
+        source: String(x?.source || 'web'),
+        url: String(x?.url || ''),
+      })).filter(x => x.title && x.url);
+      if (items.length) {
+        bundle.trends = {
+          lastUpdated: tj?.fetchedAt || undefined,
+          items,
+        };
+      }
+    }
+  } catch {}
+
   // Persist snapshot for brief reuse
   await writeCachedBundle(supabase, internalChannelId, bundle);
   try {
@@ -444,6 +468,12 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
       lines.push(`Competitor Video Titles (recent top performers from similar channels): ${titleList}`);
     }
   }
+  if (bundle.trends && Array.isArray(bundle.trends.items) && bundle.trends.items.length) {
+    const label = bundle.trends.lastUpdated ? `Trends (last updated: ${bundle.trends.lastUpdated})` : 'Trends';
+    const linesList = bundle.trends.items.slice(0, 10).map((t, i) => `  - [${t.source}] ${t.title} (${t.url})`);
+    lines.push(label + ':');
+    lines.push(...linesList);
+  }
   
   // Add guardrails section
   lines.push('');
@@ -453,6 +483,12 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
   lines.push('- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.');
   lines.push('- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.');
   lines.push('- You can use competitor video titles as inspiration for generating similar content ideas.');
+  if (bundle.trends && Array.isArray(bundle.trends.items) && bundle.trends.items.length) {
+    lines.push('- When generating video titles: BY DEFAULT use the Trends listed above as inspiration, reframing them for this channel\'s niche.');
+    lines.push('- If user explicitly requests "latest trends" or "trending topics", definitely incorporate the Trends listed above.');
+    lines.push('- If user requests titles about a specific topic, focus on that topic instead of trends.');
+    lines.push('- When using trends, adapt and reword the concepts to fit the channel\'s style and audience - don\'t copy titles verbatim.');
+  }
   if (bundle.script && Array.isArray(bundle.script.sections) && bundle.script.sections.length > 0) {
     lines.push('- When users ask about their script or next video, reference the SCRIPT OUTLINE provided above with specific section titles and summaries.');
     lines.push('- Provide feedback on script structure, pacing, section content, and timing based on the outlined sections.');
@@ -574,6 +610,62 @@ export async function invalidateNeriaContextForScript(internalChannelId: string)
   // Invalidate context cache when scripts are created/updated
   // This ensures Neria gets fresh script content in conversations
   await invalidateNeriaContextCache(internalChannelId);
+}
+
+export async function patchNeriaContextTrends(internalChannelId: string) {
+  try {
+    const supabase = await createSupabaseServerClient();
+    // Read trends from DB
+    const { data: rows } = await supabase
+      .from('trends')
+      .select('title, url, source, fetched_at')
+      .eq('channel_id', internalChannelId)
+      .order('score', { ascending: false })
+      .limit(10);
+    if (!rows || rows.length === 0) {
+      console.log('[patchNeriaContextTrends] No trends found for channel:', internalChannelId);
+      return;
+    }
+
+    // Load existing bundle - try both DB and memory cache
+    let bundle = await readCachedBundle(supabase, internalChannelId);
+    if (!bundle) {
+      // Try memory cache as fallback
+      try {
+        const g: any = globalThis as any;
+        if (g.__neriaContextCache instanceof Map) {
+          const hit = g.__neriaContextCache.get(`bundle:${internalChannelId}`);
+          if (hit && hit.bundle) bundle = hit.bundle as ContextBundle;
+        }
+      } catch {}
+    }
+    
+    // If still no bundle, don't create a minimal one - let the next full context build handle it
+    if (!bundle) {
+      console.log('[patchNeriaContextTrends] No existing bundle found, skipping trends patch for channel:', internalChannelId);
+      return;
+    }
+
+    console.log('[patchNeriaContextTrends] Patching trends into existing bundle for channel:', internalChannelId, 'trends count:', rows.length);
+
+    // Update trends in existing bundle
+    bundle.trends = {
+      lastUpdated: rows[0]?.fetched_at || undefined,
+      items: rows.map((r: any) => ({ title: r.title, source: r.source, url: r.url })),
+    };
+
+    // Persist and update memory cache
+    await writeCachedBundle(supabase, internalChannelId, bundle);
+    try {
+      const g: any = globalThis as any;
+      g.__neriaContextCache ||= new Map();
+      g.__neriaContextCache.set(`bundle:${internalChannelId}`, { ts: Date.now(), bundle });
+    } catch {}
+    
+    console.log('[patchNeriaContextTrends] Successfully patched trends into bundle');
+  } catch (e) {
+    console.error('[patchNeriaContextTrends] Error:', e);
+  }
 }
 
 

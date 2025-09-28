@@ -197,6 +197,16 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
               Competitors
             </Link>
             <Link
+              href={`/dashboard/${encodeURIComponent(currentChannelId)}/trends`}
+              className={`block text-base ${
+                isActivePath(`/dashboard/${currentChannelId}/trends`)
+                  ? "text-gray-900 font-medium"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Trends
+            </Link>
+            <Link
               href={`/dashboard/${encodeURIComponent(currentChannelId)}/thumbnail-content`}
               className={`block text-base ${
                 isActivePath(`/dashboard/${currentChannelId}/thumbnail-content`)
