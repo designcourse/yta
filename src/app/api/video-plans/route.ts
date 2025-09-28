@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
-import { getClient } from "@/utils/openai";
-import { getPrompt, renderTemplate } from "@/utils/prompts";
-import { getCachedContextBundle, invalidateNeriaContextCache, patchNeriaContextNextVideo } from "@/utils/neria-context";
+// Avoid heavy LLM imports for plan creation path; fallback summary used
+// Defer loading context helpers to runtime to avoid heavy chunking
 
 async function loadChannelContext(supabase: any, userId: string, externalChannelId: string) {
   const { data: channelMeta, error: chErr } = await supabase
@@ -48,25 +47,7 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (ideaErr || !ideaRow) return NextResponse.json({ error: "Idea not found" }, { status: 404 });
 
-    const template = await getPrompt("video_plan_summary");
-    const finalSystem = renderTemplate(template, {
-      video_title: ideaRow.title,
-      channel_about: ctx.aboutText || "",
-    });
-
-    const modelConfig = { provider: "openai", model: "gpt-4o" } as const;
-    const client = getClient(modelConfig.provider);
-    const completion = await client.chat.completions.create({
-      model: modelConfig.model,
-      messages: [
-        { role: "system", content: finalSystem },
-        { role: "user", content: "Provide the 3-sentence elaboration now." },
-      ],
-      max_tokens: 220,
-      temperature: 0.5,
-    });
-    const summary = (completion.choices?.[0]?.message?.content || "").trim();
-    if (!summary) return NextResponse.json({ error: "Failed to generate summary" }, { status: 500 });
+    const summary = `Draft plan for "${ideaRow.title}". You can refine this later.`;
 
     const insertPayload = {
       user_id: user.id,
@@ -114,6 +95,7 @@ export async function POST(request: Request) {
           .update({ is_next: true })
           .eq('id', planRows.id);
         // Update cached bundle in-place if present; avoid full rebuild
+        const { getCachedContextBundle, patchNeriaContextNextVideo, invalidateNeriaContextCache } = await import("@/utils/neria-context");
         const cached = await getCachedContextBundle(ctx.channelMeta.id);
         if (cached) {
           await patchNeriaContextNextVideo(ctx.channelMeta.id, {
@@ -218,6 +200,7 @@ export async function PUT(request: Request) {
         .eq('user_id', user.id);
 
       // Update cached bundle in-place if present; avoid full rebuild
+      const { getCachedContextBundle, patchNeriaContextNextVideo, invalidateNeriaContextCache } = await import("@/utils/neria-context");
       const cached = await getCachedContextBundle(planRow.channel_id);
       if (cached) {
         // Check outline status

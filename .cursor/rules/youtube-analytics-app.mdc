@@ -585,3 +585,51 @@ This enhancement ensures Neria has comprehensive, real-time access to channel an
 - **Context Integration**: Next video status always available in Neria's system prompt
 
 This system keeps creators focused on completing their planned videos while providing intelligent, context-aware guidance through Neria's coaching interface.
+
+## Feature: Pre-Publish Video Analysis Uploads
+
+### Overview
+- Purpose: let creators upload an unpublished cut, run Gemini video analysis (hook, pacing, energy, visual, transcript), and compare against eventual YouTube performance.
+- Storage: temporary file in S3; structured results persisted in Supabase (`prepublish_videos`, `prepublish_analyses`).
+
+### Upload Flow
+1. Planner card (`PlannerClient`) exposes `Analyze rough cut` to choose a video file.
+2. `POST /api/videos/prepublish/init` returns presigned S3 PUT URL + key.
+3. Client uploads directly via XHR with progress updates, then calls `POST /api/videos/prepublish/commit` with `{ channelId, planId, key, mime, sizeBytes }`.
+4. Commit endpoint writes `prepublish_videos` row (status `queued`) and launches background task:
+   - pulls file from S3
+   - uploads to Gemini Files API (`files:upload` with polling until ACTIVE)
+   - runs `gemini-2.5-pro` structured JSON prompt (`hook_strength`, pacing metrics, `Flat spots`, `moments`, transcript, summary)
+   - inserts `prepublish_analyses` record and updates status to `ready`
+   - surface errors by setting `status='error'` and `error` message (displayed in UI)
+
+### Reanalysis
+- `POST /api/videos/prepublish/reanalyze` accepts `{ planId | prepublishVideoId }` and reuses stored S3 key.
+- Downloads S3 object, uploads to Gemini, persists new analysis, cleans up remote file.
+- Handles `Gemini upload error` / `FAILED_PRECONDITION` by polling `file.state` until ACTIVE; errors stored back on `prepublish_videos`.
+
+### Status APIs & UI
+- `GET /api/videos/prepublish?id` → by UUID; `GET /api/videos/prepublish?planId=` → latest for plan used in polling/UI.
+- `PlannerClient` maintains per-plan status (`uploading` → `queued` → `analyzing` → `ready`/`error`) and shows server error text inline.
+- `Reanalyze` button triggers flow without re-upload, starting polling again and clearing stale errors.
+- UI shows upload progress (XHR), handles large files (~600MB) and gracefully reports S3/Gemini failures.
+
+### Plan Detail View Integration
+- `PrepublishAnalysisCard` renders on `/dashboard/[channel]/planner/video/[planId]`.
+- Fetches `/api/videos/prepublish?planId=...` once on mount (no polling) and displays:
+  - Latest status + timestamp + link to raw JSON
+  - Score tiles (Hook/Pacing/Energy/Visual) with schema-insensitive field detection (`hook_strength`, `hook_score`, etc.)
+  - Pacing metrics block with fallback copy when Gemini omits metrics
+  - Flat spots timeline with parsed numeric or string timestamps (`mm:ss`, `Xm Ys`)
+  - Highlight moments sorted by time with caption/title fallback
+  - Summary paragraph
+- Handles missing fields gracefully (renders `?` or explanatory text).
+
+### Neria Context Integration
+- `patchNeriaContextNextVideo` includes prepublish summary + scores when plan marked `is_next`.
+- Allows Neria to reference rough-cut insights when coaching before publish.
+
+### Operational Notes
+- S3 config via `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, optional `S3_PUBLIC_BASE_URL`.
+- Gemini API key required; large uploads use raw protocol with state polling.
+- Analysis results are temporary: files expire after 24h; structured rows remain for history.

@@ -138,6 +138,16 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
               Video Planner
             </Link>
             <Link
+              href={`/dashboard/${encodeURIComponent(currentChannelId)}/buckets`}
+              className={`block text-base ${
+                isActivePath(`/dashboard/${currentChannelId}/buckets`)
+                  ? "text-gray-900 font-medium"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Content Buckets
+            </Link>
+            <Link
               href={`/dashboard/${encodeURIComponent(currentChannelId)}/best-performing`}
               className={`block text-base ${
                 isActivePath(`/dashboard/${currentChannelId}/best-performing`)

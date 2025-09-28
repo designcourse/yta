@@ -14,8 +14,16 @@ interface VideoData {
   stats_retrieved_at: string;
 }
 
+interface BucketInfo {
+  id: string;
+  key: string;
+  label: string;
+  description?: string;
+}
+
 export default function LatestVideoClient({ channelId }: { channelId: string }) {
   const [videoData, setVideoData] = useState<VideoData | null>(null);
+  const [bucketInfo, setBucketInfo] = useState<BucketInfo | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showContainer, setShowContainer] = useState(false);
@@ -62,6 +70,8 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
 
       const data = await response.json();
       setVideoData(data.video);
+      setBucketInfo(data.bucket);
+      setOriginalBucketInfo(data.bucket);
       setTimeout(() => setShowContainer(true), 50);
       // Load KPIs after snapshot available
       fetchKpis();
@@ -106,9 +116,27 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
     }
   };
 
+  const [originalBucketInfo, setOriginalBucketInfo] = useState<BucketInfo | null>(null);
+
   const handleRefresh = () => {
     setShowContainer(false);
     fetchLatestVideo(true);
+  };
+
+  // Fetch bucket info for a specific video
+  const fetchBucketInfo = async (videoId: string) => {
+    try {
+      const response = await fetch(`/api/video-bucket?channelId=${encodeURIComponent(channelId)}&videoId=${encodeURIComponent(videoId)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setBucketInfo(data.bucket);
+      } else {
+        setBucketInfo(null);
+      }
+    } catch (error) {
+      console.error('Error fetching bucket info:', error);
+      setBucketInfo(null);
+    }
   };
 
   // Compute early-velocity rescue signal (proxy until CTR_1h available)
@@ -164,7 +192,17 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
           <select
             className="text-sm border rounded px-2 py-1"
             value={selectedVideoId || ''}
-            onChange={(e) => { const next = e.target.value || null; setSelectedVideoId(next); fetchKpis(next); }}
+            onChange={(e) => { 
+              const next = e.target.value || null; 
+              setSelectedVideoId(next); 
+              fetchKpis(next);
+              if (next) {
+                fetchBucketInfo(next);
+              } else {
+                // Reset to original bucket info when selecting "Latest"
+                setBucketInfo(originalBucketInfo);
+              }
+            }}
           >
             <option value="">Latest</option>
             {recent.map((v) => (
@@ -205,6 +243,39 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
             })()
           ) : (
             <LastVideoContainer videoData={videoData} />
+          )}
+
+          {/* Content Bucket Info */}
+          {bucketInfo && (
+            <div className="mt-6 bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <svg className="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-gray-900">Content Bucket</h4>
+                    <span className="px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
+                      {bucketInfo.key}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-700 mt-1">
+                    <span className="font-medium">{bucketInfo.label}</span>
+                    {bucketInfo.description && (
+                      <span className="text-gray-600 ml-2">• {bucketInfo.description}</span>
+                    )}
+                  </div>
+                </div>
+                <a 
+                  href={`/dashboard/${channelId}/buckets`}
+                  className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+                >
+                  View All Buckets →
+                </a>
+              </div>
+            </div>
           )}
 
           {/* KPIs vs Baselines */}

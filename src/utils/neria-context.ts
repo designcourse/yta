@@ -347,6 +347,49 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
       steps.push(nv.hasThumbnail ? 'thumbnail=done' : 'thumbnail=pending');
       steps.push(nv.hasOutline ? 'outline=done' : 'outline=pending');
       lines.push(`NEXT VIDEO: ${nv.title || '(untitled)'} [${steps.join(', ')}]`);
+      // Attempt to enrich with prepublish analysis summary (optional)
+      try {
+        if (nv.planId) {
+          const admin = createSupabaseAdminClient();
+          const { data: vids } = await admin
+            .from('prepublish_videos')
+            .select('id')
+            .eq('plan_id', nv.planId)
+            .order('uploaded_at', { ascending: false })
+            .limit(1);
+          const vidId = vids?.[0]?.id;
+          if (vidId) {
+            const { data: a } = await admin
+              .from('prepublish_analyses')
+              .select('analysis_json')
+              .eq('prepublish_video_id', vidId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            const aj: any = a?.analysis_json || null;
+            if (aj?.scores) {
+              const hook = aj.scores.hook_strength;
+              const pacing = aj.scores.pacing;
+              const energy = aj.scores.energy;
+              const ve = aj.scores.visual_engagement;
+              const parts: string[] = [];
+              if (hook != null) parts.push(`hook=${Number(hook).toFixed(1)}`);
+              if (pacing != null) parts.push(`pacing=${Number(pacing).toFixed(1)}`);
+              if (energy != null) parts.push(`energy=${Number(energy).toFixed(1)}`);
+              if (ve != null) parts.push(`visual=${Number(ve).toFixed(1)}`);
+              if (parts.length) lines.push(`Prepublish Scores: ${parts.join(', ')}`);
+              const firstFlat = Array.isArray(aj.flat_spots) && aj.flat_spots[0]
+                ? `Flat spot near @${Math.round(aj.flat_spots[0].start || 0)}s`
+                : '';
+              const firstMoment = Array.isArray(aj.moments) && aj.moments[0]
+                ? `Strong moment @${Math.round(aj.moments[0].time || 0)}s`
+                : '';
+              const hints = [firstFlat, firstMoment].filter(Boolean).join(' | ');
+              if (hints) lines.push(hints);
+            }
+          }
+        }
+      } catch {}
     }
   }
   // Script content (if available)

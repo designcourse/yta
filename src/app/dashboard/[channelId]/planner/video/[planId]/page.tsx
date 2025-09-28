@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
 import ThumbnailPicker from "@/components/ThumbnailPicker";
 import ScriptContainer from "@/components/ScriptContainer";
+import PrepublishAnalysisCard from "@/components/PrepublishAnalysisCard";
 
 export default async function VideoPlanPage({ params }: { params: Promise<{ channelId: string; planId: string }> }) {
   const { channelId, planId } = await params;
@@ -34,7 +35,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
 
   return (
     <div className="space-y-15">
-      <div className="relative">
+      <div className="relative space-y-8">
         <div className="grid grid-cols-[380px_1fr] gap-[50px]">
           <div className="bg-white rounded-lg overflow-hidden max-w-[380px]">
             <div className="relative">
@@ -76,6 +77,7 @@ export default async function VideoPlanPage({ params }: { params: Promise<{ chan
             <p className="text-gray-800 whitespace-pre-line">{plan?.summary || 'Generating...'}</p>
           </div>
         </div>
+        <PrepublishAnalysisCard planId={planId} />
         <ScriptContainer planId={planId} />
       </div>
     </div>

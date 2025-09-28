@@ -37,6 +37,43 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
   const [fadeOut, setFadeOut] = useState(false);
   const redirectHandledRef = useRef(false);
   const [selectingIdeaId, setSelectingIdeaId] = useState<string | null>(null);
+  const [uploadingPlanId, setUploadingPlanId] = useState<string | null>(null);
+  const [uploadPct, setUploadPct] = useState<Record<string, number>>({});
+  const [prepublishStatus, setPrepublishStatus] = useState<Record<string, { id?: string; status?: string; summary?: string }>>({});
+
+  async function uploadWithProgress(url: string, file: File, contentType: string, onProgress: (pct: number) => void) {
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url, true);
+      xhr.setRequestHeader('Content-Type', contentType);
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          const pct = Math.max(0, Math.min(100, (evt.loaded / evt.total) * 100));
+          onProgress(pct);
+        }
+      };
+      xhr.onerror = () => reject(new Error('Upload failed'));
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`Upload failed (${xhr.status})`));
+      };
+      xhr.send(file);
+    });
+  }
+
+  function pollPrepublish(preId: string, planId: string) {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/videos/prepublish/${encodeURIComponent(preId)}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const status = data?.video?.status || 'queued';
+        const errorMsg = data?.video?.error || undefined;
+        setPrepublishStatus((s) => ({ ...s, [planId]: { id: preId, status, summary: errorMsg } }));
+        if (status === 'ready' || status === 'error' || status === 'expired') clearInterval(interval);
+      } catch {}
+    }, 4000);
+  }
 
   const fetchChannelData = useCallback(async () => {
     if (!channelId) return;
@@ -117,6 +154,38 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
       fetchSavedPlans();
     }
   }, [channelId, fetchChannelData, fetchVideoIdeas, fetchSavedPlans, searchParams]);
+
+  // Initialize prepublish status for existing videos
+  useEffect(() => {
+    if (savedPlans.length > 0) {
+      savedPlans.forEach(async (plan) => {
+        if (!prepublishStatus[plan.id]) {
+          try {
+            const res = await fetch(`/api/videos/prepublish?planId=${plan.id}`);
+            if (res.ok) {
+              const data = await res.json();
+              if (data.video) {
+                setPrepublishStatus((s) => ({ 
+                  ...s, 
+                  [plan.id]: { 
+                    id: data.video.id, 
+                    status: data.video.status,
+                    summary: data.video.error
+                  } 
+                }));
+                // Start polling if still processing
+                if (data.video.status === 'queued' || data.video.status === 'analyzing') {
+                  pollPrepublish(data.video.id, plan.id);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to fetch prepublish status for plan', plan.id, err);
+          }
+        }
+      });
+    }
+  }, [savedPlans]);
 
   useEffect(() => {
     const generating = searchParams.get('generating');
@@ -337,6 +406,85 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
                         <span className="line-clamp-2">{plan.title}</span>
                       </h3>
                       <p className="text-base text-gray-600">{channelData?.title || 'DesignCourse'}</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <label
+                          className="inline-block px-3 py-1 text-sm border rounded cursor-pointer bg-gray-50 hover:bg-gray-100"
+                          onClick={(e) => { e.stopPropagation(); }}
+                          onMouseDown={(e) => { e.stopPropagation(); }}
+                          onPointerDown={(e) => { e.stopPropagation(); }}
+                        >
+                          <input
+                            type="file"
+                            accept="video/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              setUploadingPlanId(plan.id);
+                              try {
+                                // 1) get presigned PUT for raw upload
+                                const initRes = await fetch('/api/videos/prepublish/init', {
+                                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ channelId, planId: plan.id, fileName: file.name, contentType: file.type })
+                                });
+                                const initJson = await initRes.json();
+                                if (!initRes.ok) throw new Error(initJson?.error || 'init failed');
+                                // 2) upload file with progress
+                                setUploadPct((p) => ({ ...p, [plan.id]: 0 }));
+                                await uploadWithProgress(initJson.uploadUrl, file, file.type, (pct) => {
+                                  setUploadPct((p) => ({ ...p, [plan.id]: Math.round(pct) }));
+                                });
+                                // 3) commit + trigger analysis
+                                const commitRes = await fetch('/api/videos/prepublish/commit', {
+                                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ channelId, planId: plan.id, key: initJson.key, mime: file.type, sizeBytes: file.size })
+                                });
+                                const commitJson = await commitRes.json();
+                                if (!commitRes.ok) throw new Error(commitJson?.error || 'commit failed');
+                                setPrepublishStatus((s) => ({ ...s, [plan.id]: { id: commitJson.id, status: 'queued' } }));
+                                pollPrepublish(commitJson.id, plan.id);
+                              } catch (err: any) {
+                                setPrepublishStatus((s) => ({ ...s, [plan.id]: { status: 'error', summary: String(err?.message || err) } }));
+                              } finally {
+                                setUploadingPlanId(null);
+                              }
+                            }}
+                          />
+                          {uploadingPlanId === plan.id
+                            ? `Uploading… ${uploadPct[plan.id] ?? 0}%`
+                            : 'Analyze rough cut'}
+                        </label>
+                        {prepublishStatus[plan.id]?.status && (
+                          <span className="text-xs text-gray-500">
+                            {prepublishStatus[plan.id]?.status}
+                            {prepublishStatus[plan.id]?.summary && prepublishStatus[plan.id]?.status === 'error' && (
+                              <span className="text-red-600 ml-1">({prepublishStatus[plan.id]?.summary})</span>
+                            )}
+                          </span>
+                        )}
+                        <button
+                          className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            // Reanalyze latest prior upload for this plan (no re-upload needed)
+                            setPrepublishStatus((s) => ({ ...s, [plan.id]: { status: 'analyzing', summary: 'Starting re-analysis...' } }));
+                            const res = await fetch('/api/videos/prepublish/reanalyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ planId: plan.id }) });
+                            const j = await res.json().catch(() => ({}));
+                            if (res.ok && j?.prepublishVideoId) {
+                              setPrepublishStatus((s)=>({ ...s, [plan.id]: { id: j.prepublishVideoId, status: 'analyzing' } }));
+                              pollPrepublish(j.prepublishVideoId, plan.id);
+                            } else {
+                              const errorMsg = j?.error || (res.ok ? 'No prior upload found' : `Failed: ${res.status}`);
+                              setPrepublishStatus((s)=>({ ...s, [plan.id]: { status: 'error', summary: errorMsg } }));
+                            }
+                          }}
+                        >Reanalyze</button>
+                        {uploadPct[plan.id] != null && uploadingPlanId === plan.id && (
+                          <div className="flex-1 h-1 bg-gray-200 rounded overflow-hidden">
+                            <div className="h-full bg-blue-600" style={{ width: `${Math.max(0, Math.min(100, uploadPct[plan.id]))}%` }} />
+                          </div>
+                        )}
+                      </div>
                     </div>
                     {/* 3-dot menu to mark as next */}
                     <PlanMenu planId={plan.id} title={plan.title} channelId={channelId} isNext={!!plan.is_next} onMarked={fetchSavedPlans} />

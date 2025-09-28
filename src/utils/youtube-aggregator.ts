@@ -2,6 +2,7 @@ import { createSupabaseAdminClient } from '@/utils/supabase/admin';
 import { COLLECTION_SAMPLE_SIZE, COLLECTION_TTL_HOURS } from '@/utils/config';
 import { NeriaInput } from '@/utils/types/neria';
 import { determineLengthBand } from '@/utils/baselines';
+import { classifyChannelVideos, VideoForClustering } from '@/utils/bucket-classifier';
 
 type AggregateParams = {
   userId: string;
@@ -421,6 +422,37 @@ export async function aggregateYouTubeData(params: AggregateParams): Promise<{ n
         .upsert(rows, { onConflict: 'channel_id,video_id,date' });
     }
   } catch {}
+
+  // Classify videos into content buckets during onboarding
+  try {
+    console.log('[Bucket Classification] Starting bucket classification for channel onboarding');
+    
+    // Convert recent uploads to VideoForClustering format
+    const videosForClustering: VideoForClustering[] = neriaInput.recentUploads
+      .slice(0, 40) // Use latest 40 videos as requested
+      .map((video) => ({
+        id: video.id,
+        title: video.title || '',
+        description: video.description || '',
+        publishedAt: video.publishedAt,
+        durationSec: video.durationSec,
+      }));
+
+    if (videosForClustering.length > 0) {
+      const { buckets, assignments } = await classifyChannelVideos(
+        userId,
+        channelId,
+        videosForClustering
+      );
+      
+      console.log(`[Bucket Classification] Created ${buckets.length} buckets with ${assignments.length} video assignments`);
+    } else {
+      console.log('[Bucket Classification] No videos available for classification');
+    }
+  } catch (error) {
+    console.error('[Bucket Classification] Failed to classify videos during onboarding:', error);
+    // Don't fail the entire onboarding process if bucket classification fails
+  }
 
   return { neriaInput, winners, losers, lifetimeViews: totalViews };
 }

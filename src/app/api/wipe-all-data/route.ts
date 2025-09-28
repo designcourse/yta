@@ -111,6 +111,78 @@ export async function POST(request: Request) {
         .eq("user_id", user.id);
       if (goalsError) console.warn("⚠️ Error deleting goals:", goalsError);
 
+      // Delete video_metrics
+      const { error: videoMetricsError } = await admin
+        .from("video_metrics")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (videoMetricsError) console.warn("⚠️ Error deleting video_metrics:", videoMetricsError);
+
+      // Delete video_bucket_assignments
+      const { error: videoBucketAssignmentsError } = await admin
+        .from("video_bucket_assignments")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (videoBucketAssignmentsError) console.warn("⚠️ Error deleting video_bucket_assignments:", videoBucketAssignmentsError);
+
+      // Delete content_buckets
+      const { error: contentBucketsError } = await admin
+        .from("content_buckets")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (contentBucketsError) console.warn("⚠️ Error deleting content_buckets:", contentBucketsError);
+
+      // Delete experiments
+      const { error: experimentsError } = await admin
+        .from("experiments")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (experimentsError) console.warn("⚠️ Error deleting experiments:", experimentsError);
+
+      // Delete competitors
+      const { error: competitorsError } = await admin
+        .from("competitors")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (competitorsError) console.warn("⚠️ Error deleting competitors:", competitorsError);
+
+      // Delete video_plans
+      const { error: videoPlansError } = await admin
+        .from("video_plans")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (videoPlansError) console.warn("⚠️ Error deleting video_plans:", videoPlansError);
+
+      // Delete scripts
+      const { error: scriptsError } = await admin
+        .from("scripts")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (scriptsError) console.warn("⚠️ Error deleting scripts:", scriptsError);
+
+      // Delete prepublish_videos
+      const { error: prepublishVideosError } = await admin
+        .from("prepublish_videos")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (prepublishVideosError) console.warn("⚠️ Error deleting prepublish_videos:", prepublishVideosError);
+
+      // Delete prepublish_analyses
+      const { error: prepublishAnalysesError } = await admin
+        .from("prepublish_analyses")
+        .delete()
+        .in("channel_id", channelIds)
+        .eq("user_id", user.id);
+      if (prepublishAnalysesError) console.warn("⚠️ Error deleting prepublish_analyses:", prepublishAnalysesError);
+
       console.log("✅ Successfully deleted channel-related data");
     }
 

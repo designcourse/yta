@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
+import { assignVideoToBucket, VideoForClustering } from "@/utils/bucket-classifier";
 import { getValidAccessToken } from "@/utils/googleAuth";
 
 export async function GET(request: Request) {
@@ -48,8 +49,39 @@ export async function GET(request: Request) {
       const thirtyMinutes = 30 * 60 * 1000;
       
       if (statsAge < thirtyMinutes) {
+        // Get bucket information for cached video
+        let cachedBucketInfo = null;
+        try {
+          const { data: bucketData } = await admin
+            .from('video_metrics')
+            .select(`
+              bucket_id,
+              content_buckets!inner (
+                bucket_key,
+                label,
+                description
+              )
+            `)
+            .eq('user_id', user.id)
+            .eq('channel_id', channelId)
+            .eq('video_id', existingSnapshot.video_id)
+            .single();
+
+          if (bucketData?.content_buckets) {
+            cachedBucketInfo = {
+              id: bucketData.bucket_id,
+              key: bucketData.content_buckets.bucket_key,
+              label: bucketData.content_buckets.label,
+              description: bucketData.content_buckets.description
+            };
+          }
+        } catch (error) {
+          console.log(`[Bucket Info] No bucket found for cached video ${existingSnapshot.video_id}:`, error);
+        }
+
         return NextResponse.json({
           video: existingSnapshot,
+          bucket: cachedBucketInfo,
           fromCache: true
         });
       }
@@ -176,8 +208,70 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Failed to save video snapshot" }, { status: 500 });
     }
 
+    // Get bucket information for this video
+    let bucketInfo = null;
+    try {
+      const { data: bucketData } = await admin
+        .from('video_metrics')
+        .select(`
+          bucket_id,
+          content_buckets!inner (
+            bucket_key,
+            label,
+            description
+          )
+        `)
+        .eq('user_id', user.id)
+        .eq('channel_id', channelId)
+        .eq('video_id', videoId)
+        .single();
+
+      if (bucketData?.content_buckets) {
+        bucketInfo = {
+          id: bucketData.bucket_id,
+          key: bucketData.content_buckets.bucket_key,
+          label: bucketData.content_buckets.label,
+          description: bucketData.content_buckets.description
+        };
+      }
+    } catch (error) {
+      console.log(`[Bucket Info] No bucket found for video ${videoId}:`, error);
+      // Don't fail the request if bucket info is missing
+    }
+
+    // Check if this is a new video that needs bucket assignment
+    try {
+      const { data: existingMetric } = await admin
+        .from('video_metrics')
+        .select('bucket_id')
+        .eq('user_id', user.id)
+        .eq('channel_id', channelId)
+        .eq('video_id', videoId)
+        .single();
+
+      // If video doesn't exist in metrics or has no bucket assigned, assign it
+      if (!existingMetric || !existingMetric.bucket_id) {
+        console.log(`[Bucket Assignment] Assigning bucket for new video: ${videoId}`);
+        
+        const videoForClassification: VideoForClustering = {
+          id: videoId,
+          title: videoStats.snippet.title || '',
+          description: videoStats.snippet.description || '',
+          publishedAt: videoStats.snippet.publishedAt,
+          durationSec: undefined, // We don't have duration in this context
+        };
+
+        await assignVideoToBucket(user.id, channelId, videoForClassification);
+        console.log(`[Bucket Assignment] Successfully assigned bucket for video: ${videoId}`);
+      }
+    } catch (error) {
+      console.error(`[Bucket Assignment] Failed to assign bucket for video ${videoId}:`, error);
+      // Don't fail the entire request if bucket assignment fails
+    }
+
     return NextResponse.json({
       video: snapshot,
+      bucket: bucketInfo,
       fromCache: false
     });
 
