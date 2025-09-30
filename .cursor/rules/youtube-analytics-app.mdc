@@ -750,3 +750,98 @@ CREATE TABLE video_early_metrics (
 ### Additional Cron Jobs
 - `POST /api/channel-polling/check-new-videos`: Monitors for new uploads, triggers early metrics scheduling
 - Both cron jobs run every 10 minutes to maintain near-real-time data freshness
+
+## Feature: Trending Videos Discovery
+
+### Overview
+- Page: `/dashboard/[channelId]/trending`
+- API: `/api/trending/youtube`
+- Purpose: Help creators discover trending videos in their niche for content inspiration and competitive intelligence
+- Integration: Uses YouTube Data API v3 with search and video details endpoints
+
+### Core Functionality
+- **Niche-Based Search**: Automatically defaults to creator's most popular content bucket theme
+- **Custom Queries**: Allows manual search term input for flexible topic exploration
+- **Time Filtering**: Filter videos by upload recency (24h, 2d, 3d, 5d, 1w, 2w, 1m)
+- **View-Count Sorting**: Results automatically sorted by highest views first
+- **Rate Limiting**: 10 searches per 30 minutes for regular users to manage API quotas
+- **Admin Bypass**: Hardcoded `designcoursecom@gmail.com` as admin with unlimited searches
+
+### API Implementation (`src/app/api/trending/youtube/route.ts`)
+- Uses `YOUTUBE_API_KEY` environment variable (not user OAuth tokens) for public search
+- Determines default search terms from user's most popular content bucket (by total views)
+- Accepts query parameters: `channelId`, `query`, `timeFilter`, `maxResults`, `regionCode`, `isAdmin`
+- Two-stage API flow:
+  1. YouTube Search API: finds matching video IDs with relevance filters
+  2. YouTube Videos API: fetches full details (statistics, thumbnails, metadata)
+- Rate limiting enforced via in-memory `Map` tracking user requests with 30-minute rolling window
+- Returns JSON: `{ videos: TrendingVideo[], searchTerms: string, count: number }`
+
+### Search Parameters
+- **Query**: Search term (defaults to top bucket label, e.g., "UI/UX design")
+- **Order**: `viewCount` for highest-performing videos
+- **Published After**: ISO date based on time filter selection
+- **Video Duration**: `medium` (4-20 minutes) to focus on substantial content
+- **Relevance Language**: `en` for English-language results
+- **Region Code**: `US` default, configurable per request
+
+### UI Components (`src/components/TrendingClient.tsx`)
+- **Search Input**: Pre-populated with channel's core topic, editable
+- **Time Filter Dropdown**: 7 options from 24 hours to 1 month
+- **Search Button**: Manual trigger with Enter key support
+- **Video Grid**: Responsive card layout with thumbnails, titles, metadata
+- **Loading States**: Spinner during API calls
+- **Error Handling**: User-friendly messages for API failures and rate limits
+- **Rate Limit Warning**: Yellow banner with retry countdown when limit exceeded
+
+### Video Card Display
+Each trending video card shows:
+- High-quality thumbnail (maxres or high fallback)
+- Video title (clickable link to YouTube)
+- Channel name and publish date
+- View count, like count, comment count (formatted with k/M suffixes)
+- Relative time display (e.g., "3 days ago", "2 weeks ago")
+
+### Rate Limiting System
+- **Limit**: 10 searches per 30-minute window per user
+- **Storage**: In-memory `Map<userId, timestamp[]>` in API route
+- **Cleanup**: Old timestamps removed during each check
+- **Admin Exception**: Email-based admin check bypasses all limits
+- **UI Feedback**: Clear error message with "try again in X minutes" guidance
+
+### Server-Side Page (`src/app/dashboard/[channelId]/trending/page.tsx`)
+- Determines `defaultSearchTerm` from most popular content bucket
+- Queries `content_buckets` table with view metrics aggregation
+- Checks admin status via email comparison
+- Passes props to `TrendingClient`: `channelId`, `defaultSearchTerm`, `isAdmin`
+
+### Sidebar Integration (`src/components/DashboardSidebar.tsx`)
+- "Trending" link added to main dashboard navigation
+- Accessible from all dashboard pages
+
+### Key Features
+- **Smart Defaults**: Zero-config experience with automatic niche detection
+- **Flexible Search**: Override defaults with custom queries anytime
+- **Quota Management**: Rate limiting prevents API overage charges
+- **Development-Friendly**: Admin bypass for testing without restrictions
+- **Responsive Design**: Mobile-optimized grid layout
+- **Performance**: Sorted results prioritize high-performing content
+
+### API Deprecation Note
+- ⚠️ **YouTube's `relatedToVideoId` parameter was deprecated August 7, 2023**
+- Original "find similar videos" feature removed due to API retirement
+- No replacement API available from YouTube for finding related videos
+- Current implementation relies on keyword search only
+
+### Configuration Requirements
+- **Environment Variable**: `YOUTUBE_API_KEY` must be set
+- **API Key Setup**: Create in Google Cloud Console with YouTube Data API v3 enabled
+- **Quota Considerations**: YouTube API has daily quota limits (10,000 units default)
+- **Cost**: Free tier sufficient for most use cases with rate limiting
+
+### Future Enhancements (Not Implemented)
+- Video save/bookmark functionality
+- Trending topic categories
+- Competitor tracking integration
+- Historical trend analysis
+- Export to video planner

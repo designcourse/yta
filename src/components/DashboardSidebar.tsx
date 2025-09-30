@@ -148,6 +148,16 @@ export default function DashboardSidebar({ channels, currentChannelId }: Sidebar
               Content Buckets
             </Link>
             <Link
+              href={`/dashboard/${encodeURIComponent(currentChannelId)}/trending`}
+              className={`block text-base ${
+                isActivePath(`/dashboard/${currentChannelId}/trending`)
+                  ? "text-gray-900 font-medium"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Trending
+            </Link>
+            <Link
               href={`/dashboard/${encodeURIComponent(currentChannelId)}/best-performing`}
               className={`block text-base ${
                 isActivePath(`/dashboard/${currentChannelId}/best-performing`)
