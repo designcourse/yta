@@ -2,6 +2,8 @@
 
 import RefreshContainer from "@/components/RefreshContainer";
 import LastVideoContainer from "@/components/LastVideoContainer";
+import EarlyMetricsCard from "@/components/EarlyMetricsCard";
+import EarlyMetricsProgress from "@/components/EarlyMetricsProgress";
 import { useEffect, useState } from "react";
 
 interface VideoData {
@@ -244,6 +246,30 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
           ) : (
             <LastVideoContainer videoData={videoData} />
           )}
+
+          {/* Early Metrics Progress Bar */}
+          <div className="mt-6">
+            <EarlyMetricsProgress 
+              publishedAt={
+                selectedVideoId && recent.length > 0
+                  ? (recent.find(v => v.id === selectedVideoId)?.publishedAt || videoData.published_at)
+                  : videoData.published_at
+              }
+            />
+          </div>
+
+          {/* Early Metrics (3-hour snapshot) */}
+          <div className="mt-6">
+            <EarlyMetricsCard 
+              channelId={channelId}
+              videoId={selectedVideoId || videoData.video_id}
+              publishedAt={
+                selectedVideoId && recent.length > 0
+                  ? (recent.find(v => v.id === selectedVideoId)?.publishedAt || videoData.published_at)
+                  : videoData.published_at
+              }
+            />
+          </div>
 
           {/* Content Bucket Info */}
           {bucketInfo && (

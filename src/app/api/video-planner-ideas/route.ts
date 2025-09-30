@@ -53,18 +53,84 @@ async function loadChannelContext(supabase: any, userId: string, channelId: stri
     .eq("channel_id", channelMeta.id)
     .maybeSingle();
 
+  // Get content buckets analytics
+  let contentBuckets = null;
+  try {
+    const admin = createSupabaseAdminClient();
+    
+    // Get all buckets for the channel
+    const { data: buckets } = await admin
+      .from('content_buckets')
+      .select('id, bucket_key, label, description')
+      .eq('user_id', userId)
+      .eq('channel_id', channelMeta.id)
+      .order('created_at', { ascending: true });
+
+    if (buckets && buckets.length > 0) {
+      // Get video metrics for all videos in these buckets
+      const { data: videoMetrics } = await admin
+        .from('video_metrics')
+        .select('video_id, bucket_id, views, published_at')
+        .eq('user_id', userId)
+        .eq('channel_id', channelMeta.id)
+        .not('bucket_id', 'is', null)
+        .order('published_at', { ascending: false });
+
+      // Calculate analytics for each bucket
+      const bucketsWithAnalytics = buckets.map(bucket => {
+        const bucketVideos = videoMetrics?.filter(v => v.bucket_id === bucket.id) || [];
+        const views = bucketVideos.map(v => v.views || 0).filter(v => v > 0);
+        
+        // Calculate median views (more robust than average)
+        const sortedViews = [...views].sort((a, b) => a - b);
+        const medianViews = sortedViews.length > 0 
+          ? sortedViews.length % 2 === 0
+            ? (sortedViews[sortedViews.length / 2 - 1] + sortedViews[sortedViews.length / 2]) / 2
+            : sortedViews[Math.floor(sortedViews.length / 2)]
+          : 0;
+
+        // Find top performing video
+        const topVideo = bucketVideos.reduce((top, video) => {
+          const videoViews = video.views || 0;
+          if (!top || videoViews > (top.views || 0)) {
+            return { videoId: video.video_id, views: videoViews };
+          }
+          return top;
+        }, null as { videoId: string; views: number } | null);
+
+        return {
+          key: bucket.bucket_key,
+          label: bucket.label,
+          description: bucket.description || '',
+          videoCount: bucketVideos.length,
+          medianViews: Math.round(medianViews),
+          topVideo,
+        };
+      });
+
+      // Sort by median views (highest performing first)
+      bucketsWithAnalytics.sort((a, b) => b.medianViews - a.medianViews);
+      contentBuckets = bucketsWithAnalytics;
+      console.log('[Video Ideas] Content buckets loaded:', contentBuckets.length, 'buckets');
+      console.log('[Video Ideas] Top bucket:', contentBuckets[0]?.label, 'with', contentBuckets[0]?.medianViews, 'median views');
+    }
+  } catch (error) {
+    console.error('Error loading content buckets for video ideas:', error);
+  }
+
   return {
     channelMeta,
     memoryProfile,
     latestVideo,
     aboutText,
     recentTitles,
-    strategyPlan: strategy?.plan_text || null
+    strategyPlan: strategy?.plan_text || null,
+    contentBuckets
   };
 }
 
 async function buildVideoTitlePrompt(context: any): Promise<string> {
-  const { channelMeta, memoryProfile, latestVideo, aboutText, recentTitles, strategyPlan } = context;
+  const { channelMeta, memoryProfile, latestVideo, aboutText, recentTitles, strategyPlan, contentBuckets } = context;
 
   const base = await getPrompt('video_planner_titles');
   const header = `Generate 6 compelling YouTube video title ideas for the channel "${channelMeta.title}".`;
@@ -93,6 +159,14 @@ ${memoryProfile ? `USER GOALS & PREFERENCES:
 
 ${strategyPlan ? `CURRENT STRATEGY:
 ${strategyPlan}
+` : ''}
+
+${contentBuckets && contentBuckets.length > 0 ? `CONTENT BUCKETS (Your proven content categories):
+${contentBuckets.map((bucket: any) => 
+  `- "${bucket.label}" (${bucket.videoCount} videos, ${bucket.medianViews.toLocaleString()} median views${bucket.topVideo ? `, best: ${bucket.topVideo.views.toLocaleString()} views` : ''})`
+).join('\n')}
+
+IMPORTANT: When generating titles, strongly consider these content buckets as they represent your most successful content types. Focus especially on your top-performing buckets.
 ` : ''}
 
 REQUIREMENTS:
@@ -172,6 +246,13 @@ export async function GET(request: Request) {
     const modelConfig = { provider: "openai", model: "gpt-4o" };
     const client = getClient(modelConfig.provider);
     const prompt = await buildVideoTitlePrompt(context);
+    
+    console.log('[Video Ideas] Generated prompt includes content buckets:', prompt.includes('CONTENT BUCKETS'));
+    if (context.contentBuckets && context.contentBuckets.length > 0) {
+      console.log('[Video Ideas] Using content buckets in prompt. Top bucket:', context.contentBuckets[0].label);
+    } else {
+      console.log('[Video Ideas] No content buckets available for prompt');
+    }
 
     const completion = await client.chat.completions.create({
       model: modelConfig.model,
@@ -273,10 +354,18 @@ export async function POST(request: Request) {
     const client = getClient(modelConfig.provider);
     let prompt = await buildVideoTitlePrompt(context);
     
+    console.log('[Video Ideas POST] Generated prompt includes content buckets:', prompt.includes('CONTENT BUCKETS'));
+    if (context.contentBuckets && context.contentBuckets.length > 0) {
+      console.log('[Video Ideas POST] Using content buckets in prompt. Top bucket:', context.contentBuckets[0].label);
+    } else {
+      console.log('[Video Ideas POST] No content buckets available for prompt');
+    }
+    
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
     if (customPrompt) {
       prompt += `\n\nUSER'S SPECIFIC REQUEST: "${customPrompt}"
 Please generate titles that specifically address this request while still following all other requirements.`;
+      console.log('[Video Ideas POST] Added custom prompt:', customPrompt);
     }
 
     const completion = await client.chat.completions.create({

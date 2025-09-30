@@ -728,17 +728,26 @@ async function generateVideoIdeas(supabase: any, userId: string, channelId: stri
       console.error("Could not load channel context for video ideas");
       return false;
     }
+    
+    console.log('[Neria Video Ideas] Custom prompt received:', customPrompt || 'none');
 
     // Use OpenAI GPT-4o for video idea generation (reliable and creative)
     const modelConfig = { provider: "openai", model: "gpt-4o" };
     const client = getClient(modelConfig.provider);
     let prompt = buildVideoTitlePrompt(context);
     
+    console.log('[Neria Video Ideas] Generated prompt includes content buckets:', prompt.includes('CONTENT BUCKETS'));
+    if (context.contentBuckets && context.contentBuckets.length > 0) {
+      console.log('[Neria Video Ideas] Using content buckets in prompt. Top bucket:', context.contentBuckets[0].label);
+    } else {
+      console.log('[Neria Video Ideas] No content buckets available for prompt');
+    }
     
     // If custom prompt is provided, modify the prompt to incorporate user's specific request
     if (customPrompt) {
       prompt += `\n\nUSER'S SPECIFIC REQUEST: "${customPrompt}"
 Please generate titles that specifically address this request while still following all other requirements.`;
+      console.log('[Neria Video Ideas] Added custom prompt:', customPrompt);
     }
 
     // If the user's request appears to require up-to-date info (e.g., "recent", "latest", years),
@@ -895,18 +904,82 @@ async function loadChannelContextForVideos(supabase: any, userId: string, channe
     .eq("channel_id", channelMeta.id)
     .maybeSingle();
 
+  // Get content buckets analytics
+  let contentBuckets = null;
+  try {
+    const admin = createSupabaseAdminClient();
+    
+    // Get all buckets for the channel
+    const { data: buckets } = await admin
+      .from('content_buckets')
+      .select('id, bucket_key, label, description')
+      .eq('user_id', userId)
+      .eq('channel_id', channelMeta.id)
+      .order('created_at', { ascending: true });
+
+    if (buckets && buckets.length > 0) {
+      // Get video metrics for all videos in these buckets
+      const { data: videoMetrics } = await admin
+        .from('video_metrics')
+        .select('video_id, bucket_id, views, published_at')
+        .eq('user_id', userId)
+        .eq('channel_id', channelMeta.id)
+        .not('bucket_id', 'is', null)
+        .order('published_at', { ascending: false });
+
+      // Calculate analytics for each bucket
+      const bucketsWithAnalytics = buckets.map(bucket => {
+        const bucketVideos = videoMetrics?.filter(v => v.bucket_id === bucket.id) || [];
+        const views = bucketVideos.map(v => v.views || 0).filter(v => v > 0);
+        
+        // Calculate median views (more robust than average)
+        const sortedViews = [...views].sort((a, b) => a - b);
+        const medianViews = sortedViews.length > 0 
+          ? sortedViews.length % 2 === 0
+            ? (sortedViews[sortedViews.length / 2 - 1] + sortedViews[sortedViews.length / 2]) / 2
+            : sortedViews[Math.floor(sortedViews.length / 2)]
+          : 0;
+
+        // Find top performing video
+        const topVideo = bucketVideos.reduce((top, video) => {
+          const videoViews = video.views || 0;
+          if (!top || videoViews > (top.views || 0)) {
+            return { videoId: video.video_id, views: videoViews };
+          }
+          return top;
+        }, null as { videoId: string; views: number } | null);
+
+        return {
+          key: bucket.bucket_key,
+          label: bucket.label,
+          description: bucket.description || '',
+          videoCount: bucketVideos.length,
+          medianViews: Math.round(medianViews),
+          topVideo,
+        };
+      });
+
+      // Sort by median views (highest performing first)
+      bucketsWithAnalytics.sort((a, b) => b.medianViews - a.medianViews);
+      contentBuckets = bucketsWithAnalytics;
+    }
+  } catch (error) {
+    console.error('Error loading content buckets for video ideas:', error);
+  }
+
   return {
     channelMeta,
     memoryProfile,
     latestVideo,
     aboutText,
     recentTitles,
-    strategyPlan: strategy?.plan_text || null
+    strategyPlan: strategy?.plan_text || null,
+    contentBuckets
   };
 }
 
 function buildVideoTitlePrompt(context: any): string {
-  const { channelMeta, memoryProfile, latestVideo, aboutText, recentTitles, strategyPlan } = context;
+  const { channelMeta, memoryProfile, latestVideo, aboutText, recentTitles, strategyPlan, contentBuckets } = context;
 
   return `You are Neria, a YouTube strategy coach. Generate 6 compelling YouTube video title ideas for the channel "${channelMeta.title}".
 
@@ -930,6 +1003,14 @@ ${memoryProfile ? `USER GOALS & PREFERENCES:
 
 ${strategyPlan ? `CURRENT STRATEGY:
 ${strategyPlan}
+` : ''}
+
+${contentBuckets && contentBuckets.length > 0 ? `CONTENT BUCKETS (Your proven content categories):
+${contentBuckets.map((bucket: any) => 
+  `- "${bucket.label}" (${bucket.videoCount} videos, ${bucket.medianViews.toLocaleString()} median views${bucket.topVideo ? `, best: ${bucket.topVideo.views.toLocaleString()} views` : ''})`
+).join('\n')}
+
+IMPORTANT: When generating titles, strongly consider these content buckets as they represent your most successful content types. Focus especially on your top-performing buckets.
 ` : ''}
 
 REQUIREMENTS:
@@ -1227,7 +1308,7 @@ export async function POST(request: Request) {
     }
 
     // Get current model configuration
-        const modelConfig = await getCurrentModelWithSupabase(supabase);
+    const modelConfig = await getCurrentModelWithSupabase(supabase);
 
     // Build base system prompt
     const systemPrompt = await buildSystemPrompt(pinned);
@@ -1241,7 +1322,7 @@ export async function POST(request: Request) {
           channelExternalId: pinned.channelMeta.externalId,
           internalChannelId: pinned.channelId,
         });
-        bundleText = formatBundleForSystemPrompt(bundle);
+        bundleText = await formatBundleForSystemPrompt(bundle);
       }
     } catch (e) {
       console.warn('[Neria][ContextBundle] Failed to build bundle:', e);

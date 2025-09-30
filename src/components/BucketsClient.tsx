@@ -54,6 +54,11 @@ interface BucketAnalytics {
     views: number;
   } | null;
   recentVideos: number;
+  videos: Array<{
+    videoId: string;
+    title: string;
+    views: number;
+  }>;
 }
 
 interface BucketsData {
@@ -293,6 +298,33 @@ export function BucketsClient({ channelId }: BucketsClientProps) {
                 </div>
               )}
             </div>
+
+            {/* Video List */}
+            {bucket.videos && bucket.videos.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                  Videos ({bucket.videos.length})
+                </h4>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {bucket.videos.map((video) => (
+                    <div key={video.videoId} className="flex items-start justify-between gap-2 text-sm">
+                      <a
+                        href={`https://youtube.com/watch?v=${video.videoId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 text-gray-700 hover:text-blue-600 line-clamp-2 transition-colors"
+                        title={video.title}
+                      >
+                        {video.title}
+                      </a>
+                      <span className="text-gray-500 font-medium whitespace-nowrap flex-shrink-0">
+                        {formatNumber(video.views)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

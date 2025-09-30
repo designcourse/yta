@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { createSupabaseAdminClient } from '@/utils/supabase/admin';
+import { getValidAccessToken } from '@/utils/googleAuth';
 
 interface BucketAnalytics {
   id: string;
@@ -16,7 +17,12 @@ interface BucketAnalytics {
     videoId: string;
     views: number;
   } | null;
-  recentVideos: number; // Videos from last 30 days
+  recentVideos: number;
+  videos: Array<{
+    videoId: string;
+    title: string;
+    views: number;
+  }>;
 }
 
 export async function GET(request: Request) {
@@ -68,6 +74,46 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Failed to fetch video metrics' }, { status: 500 });
     }
 
+    // Fetch video titles from YouTube API
+    const videoTitles = new Map<string, string>();
+    if (videoMetrics && videoMetrics.length > 0) {
+      try {
+        const tokenResult = await getValidAccessToken(user.id, channelId);
+        
+        if (tokenResult.success && tokenResult.accessToken) {
+          const videoIds = [...new Set(videoMetrics.map(v => v.video_id))];
+          
+          // YouTube API allows up to 50 videos per request
+          for (let i = 0; i < videoIds.length; i += 50) {
+            const batch = videoIds.slice(i, i + 50);
+            const url = new URL('https://www.googleapis.com/youtube/v3/videos');
+            url.searchParams.set('part', 'snippet');
+            url.searchParams.set('id', batch.join(','));
+
+            const res = await fetch(url.toString(), {
+              headers: { Authorization: `Bearer ${tokenResult.accessToken}` },
+              cache: 'no-store',
+            });
+
+            if (res.ok) {
+              const json = await res.json();
+              const items: any[] = Array.isArray(json?.items) ? json.items : [];
+              for (const item of items) {
+                const id = String(item?.id ?? '');
+                const title = String(item?.snippet?.title ?? 'Untitled Video');
+                if (id) {
+                  videoTitles.set(id, title);
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching video titles:', error);
+        // Continue without titles
+      }
+    }
+
     // First pass: calculate raw metrics for each bucket
     const bucketsWithRawMetrics = buckets.map(bucket => {
       const bucketVideos = videoMetrics?.filter(v => v.bucket_id === bucket.id) || [];
@@ -104,6 +150,15 @@ export async function GET(request: Request) {
       // Calculate raw performance metrics
       const rawMetrics = calculateRawMetrics(views, recentVideos, bucketVideos.length);
 
+      // Build video list with titles and views, sorted by views descending
+      const videos = bucketVideos
+        .map(v => ({
+          videoId: v.video_id,
+          title: videoTitles.get(v.video_id) || 'Untitled Video',
+          views: v.views || 0,
+        }))
+        .sort((a, b) => b.views - a.views);
+
       return {
         id: bucket.id,
         key: bucket.bucket_key,
@@ -116,6 +171,7 @@ export async function GET(request: Request) {
         rawScore: rawMetrics.rawScore,
         topVideo,
         recentVideos,
+        videos,
       };
     });
 
@@ -147,6 +203,7 @@ export async function GET(request: Request) {
         successScore,
         topVideo: bucket.topVideo,
         recentVideos: bucket.recentVideos,
+        videos: bucket.videos,
       };
     });
 

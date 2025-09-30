@@ -208,6 +208,88 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Failed to save video snapshot" }, { status: 500 });
     }
 
+    // Check if this is a new video that needs 3h metrics scheduling
+    try {
+      const { data: existingMetric } = await admin
+        .from("video_early_metrics")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("channel_id", channelId)
+        .eq("video_id", videoId)
+        .single();
+
+      // If no early metrics record exists, schedule collection
+      if (!existingMetric) {
+        const publishedDate = new Date(videoStats.snippet.publishedAt);
+        const scheduledFor = new Date(publishedDate.getTime() + (3 * 60 * 60 * 1000));
+        const now = new Date();
+
+        // Only schedule if the 3h mark hasn't passed yet
+        if (scheduledFor > now) {
+          console.log(`[Early Metrics] Scheduling collection for new video ${videoId} at ${scheduledFor.toISOString()}`);
+          
+          // Check if user has active subscription
+          const { data: subscription } = await admin
+            .from("channel_subscriptions")
+            .select("status")
+            .eq("user_id", user.id)
+            .eq("channel_id", channelId)
+            .eq("status", "active")
+            .single();
+
+          if (subscription) {
+            await admin
+              .from("video_early_metrics")
+              .insert({
+                user_id: user.id,
+                channel_id: channelId,
+                video_id: videoId,
+                video_title: videoStats.snippet.title,
+                published_at: videoStats.snippet.publishedAt,
+                scheduled_for: scheduledFor.toISOString(),
+                status: 'pending'
+              });
+            
+            console.log(`[Early Metrics] Scheduled collection for ${videoId}`);
+          } else {
+            console.log(`[Early Metrics] Skipping - no active subscription for channel ${channelId}`);
+          }
+        } else {
+          console.log(`[Early Metrics] Video ${videoId} published > 3h ago, collecting immediately`);
+          
+          // 3h mark has passed, collect immediately
+          try {
+            const statsForEarly = {
+              views_3h: parseInt(videoStats.statistics.viewCount || '0'),
+              likes_3h: parseInt(videoStats.statistics.likeCount || '0'),
+              comments_3h: parseInt(videoStats.statistics.commentCount || '0')
+            };
+
+            await admin
+              .from("video_early_metrics")
+              .insert({
+                user_id: user.id,
+                channel_id: channelId,
+                video_id: videoId,
+                video_title: videoStats.snippet.title,
+                published_at: videoStats.snippet.publishedAt,
+                scheduled_for: scheduledFor.toISOString(),
+                status: 'collected',
+                ...statsForEarly,
+                collected_at: new Date().toISOString()
+              });
+            
+            console.log(`[Early Metrics] Immediately collected for ${videoId}`);
+          } catch (collectError) {
+            console.error(`[Early Metrics] Failed to collect immediately:`, collectError);
+          }
+        }
+      }
+    } catch (scheduleError) {
+      console.error(`[Early Metrics] Failed to schedule/collect:`, scheduleError);
+      // Don't fail the entire request if early metrics scheduling fails
+    }
+
     // Get bucket information for this video
     let bucketInfo = null;
     try {

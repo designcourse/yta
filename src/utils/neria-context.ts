@@ -48,6 +48,21 @@ type ContextBundle = {
     topicOpportunities: Array<{ keyword: string; avgVpd: number; count: number }>;
     priorBased: true;
   };
+  contentBuckets?: {
+    totalBuckets: number;
+    totalVideos: number;
+    buckets: Array<{
+      key: string;
+      label: string;
+      description: string;
+      videoCount: number;
+      totalViews: number;
+      medianViews: number;
+      successScore: number;
+      topVideo: { videoId: string; views: number } | null;
+      recentVideos: number;
+    }>;
+  };
 };
 
 function medianAndIqr(q: any): { median?: number | null; iqr?: number | null } {
@@ -279,6 +294,44 @@ export async function buildNeriaContextBundle(opts: {
     }
   } catch {}
 
+  // Content Buckets Analytics
+  try {
+    console.log('[Neria][Context] Fetching content buckets for channel:', channelExternalId);
+    const bucketsRes = await fetcher(`${origin}/api/buckets/analytics?channelId=${encodeURIComponent(channelExternalId)}`);
+    console.log('[Neria][Context] Buckets API response status:', bucketsRes.status);
+    if (bucketsRes.ok) {
+      const bucketsData = await bucketsRes.json();
+      console.log('[Neria][Context] Buckets data:', JSON.stringify(bucketsData, null, 2));
+      if (bucketsData?.buckets && Array.isArray(bucketsData.buckets) && bucketsData.buckets.length > 0) {
+        bundle.contentBuckets = {
+          totalBuckets: bucketsData.totalBuckets || bucketsData.buckets.length,
+          totalVideos: bucketsData.totalVideos || 0,
+          buckets: bucketsData.buckets.map((bucket: any) => ({
+            key: String(bucket.key || ''),
+            label: String(bucket.label || ''),
+            description: String(bucket.description || ''),
+            videoCount: Number(bucket.videoCount || 0),
+            totalViews: Number(bucket.totalViews || 0),
+            medianViews: Number(bucket.medianViews || 0),
+            successScore: Number(bucket.successScore || 0),
+            topVideo: bucket.topVideo ? {
+              videoId: String(bucket.topVideo.videoId || ''),
+              views: Number(bucket.topVideo.views || 0)
+            } : null,
+            recentVideos: Number(bucket.recentVideos || 0),
+          })),
+        };
+        console.log('[Neria][Context] Content buckets added to bundle:', bundle.contentBuckets.totalBuckets, 'buckets');
+      } else {
+        console.log('[Neria][Context] No content buckets found or empty array');
+      }
+    } else {
+      console.log('[Neria][Context] Buckets API request failed:', bucketsRes.status, bucketsRes.statusText);
+    }
+  } catch (error) {
+    console.log('[Neria][Context] Error fetching content buckets:', error);
+  }
+
   // Competitor priors (cached 3h in API)
   try {
     const cRes = await fetcher(`${origin}/api/competitors/metrics?channelId=${encodeURIComponent(channelExternalId)}`);
@@ -334,7 +387,7 @@ export async function buildNeriaContextBundle(opts: {
   return bundle;
 }
 
-export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
+export async function formatBundleForSystemPrompt(bundle: ContextBundle): Promise<string> {
   const lines: string[] = [];
   lines.push('CONTEXT BUNDLE (facts only)');
   lines.push(`Refreshed: ${bundle.refreshedAt}`);
@@ -435,6 +488,16 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
     lines.push(`Next Experiment: lever=${e.lever}, steps=${e.stepsCount}${e.outcome ? `, outcome_24h=${e.outcome}` : ''}`);
     if (e.hypothesis) lines.push(`Hypothesis: ${e.hypothesis}`);
   }
+  if (bundle.contentBuckets && Array.isArray(bundle.contentBuckets.buckets) && bundle.contentBuckets.buckets.length > 0) {
+    lines.push(`Content Buckets: ${bundle.contentBuckets.totalBuckets} buckets organizing ${bundle.contentBuckets.totalVideos} videos`);
+    const bucketSummaries = bundle.contentBuckets.buckets.slice(0, 5).map(bucket => {
+      const topVideoInfo = bucket.topVideo ? ` (best: ${bucket.topVideo.views.toLocaleString()} views)` : '';
+      const recentInfo = bucket.recentVideos > 0 ? `, ${bucket.recentVideos} recent` : '';
+      return `"${bucket.label}" (${bucket.videoCount} videos, ${bucket.medianViews.toLocaleString()} median views${recentInfo}${topVideoInfo}, score: ${bucket.successScore})`;
+    }).join('; ');
+    lines.push(`Bucket Details: ${bucketSummaries}`);
+    lines.push('Note: You can draw from these content buckets when suggesting video ideas or analyzing channel strategy. Each bucket represents a proven content category with performance metrics.');
+  }
   if (bundle.competitors && Array.isArray(bundle.competitors.topicOpportunities) && bundle.competitors.topicOpportunities.length) {
     const topics = bundle.competitors.topicOpportunities.slice(0, 3).map(t => `${t.keyword} (avgVPD ${t.avgVpd.toFixed(1)}, n=${t.count})`).join('; ');
     const avg = bundle.competitors.avgVpdAcross != null ? `, avgVPD≈${bundle.competitors.avgVpdAcross}` : '';
@@ -454,6 +517,10 @@ export function formatBundleForSystemPrompt(bundle: ContextBundle): string {
   lines.push('- Keep recommendations grounded in provided KPIs, verdicts, insights, and goals.');
   lines.push('- When users ask about "competitor titles" or "similar to competitors", reference the Competitor Video Titles listed above.');
   lines.push('- You can use competitor video titles as inspiration for generating similar content ideas.');
+  if (bundle.contentBuckets && bundle.contentBuckets.buckets.length > 0) {
+    lines.push('- When suggesting video ideas, consider drawing from the established Content Buckets which have proven performance metrics.');
+    lines.push('- Reference specific bucket performance data (median views, success scores) when recommending content strategies.');
+  }
   if (bundle.script && Array.isArray(bundle.script.sections) && bundle.script.sections.length > 0) {
     lines.push('- When users ask about their script or next video, reference the SCRIPT OUTLINE provided above with specific section titles and summaries.');
     lines.push('- Provide feedback on script structure, pacing, section content, and timing based on the outlined sections.');

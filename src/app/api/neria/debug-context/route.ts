@@ -308,7 +308,7 @@ export async function POST(request: Request) {
           channelExternalId: pinned.channelMeta.externalId,
           internalChannelId: pinned.channelId,
         });
-        const bundleText = formatBundleForSystemPrompt(bundle);
+        const bundleText = await formatBundleForSystemPrompt(bundle);
         if (bundleText) {
         messages.push({
           role: 'system',

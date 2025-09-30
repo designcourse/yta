@@ -633,3 +633,120 @@ This system keeps creators focused on completing their planned videos while prov
 - S3 config via `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, optional `S3_PUBLIC_BASE_URL`.
 - Gemini API key required; large uploads use raw protocol with state polling.
 - Analysis results are temporary: files expire after 24h; structured rows remain for history.
+
+## Feature: Content Buckets with Video Details
+
+### Overview
+- Page: `/dashboard/[channelId]/buckets`
+- API: `/api/buckets/analytics`
+- Purpose: Organize and analyze videos by content category with detailed performance metrics
+
+### Core Functionality
+- **Bucket Classification**: Videos automatically grouped into content categories (e.g., "Figma Tips", "Design Tutorials")
+- **Performance Metrics**: Each bucket shows success scores, view counts, and performance trends
+- **Video Listings**: Complete list of videos in each bucket with titles and view counts
+
+### API Implementation (`src/app/api/buckets/analytics/route.ts`)
+- Fetches bucket metadata from `content_buckets` table
+- Retrieves video metrics from `video_metrics` table filtered by `bucket_id`
+- Calls YouTube Data API to fetch video titles using `getValidAccessToken` for auth
+- Batches API requests (50 videos per request) for efficiency
+- Calculates success scores, medians, and aggregated metrics per bucket
+- Returns sorted list of videos per bucket (by views descending)
+
+### UI Components (`src/components/BucketsClient.tsx`)
+- **Bucket Cards**: Grid layout displaying each content category
+- **Success Scores**: Relative scoring (15-100 scale) based on median views, consistency, recency
+- **Performance Metrics**: Total views, median/average views, video count, recent activity
+- **Video List Section**: 
+  - Scrollable list (max-height: 64 units) at bottom of each bucket card
+  - Each video shows clickable title linking to YouTube + formatted view count
+  - Videos sorted by views (highest first)
+  - Graceful fallback to "Untitled Video" if title fetch fails
+
+### Data Flow
+1. Client requests `/api/buckets/analytics?channelId={id}`
+2. Server queries `content_buckets` and `video_metrics` tables
+3. YouTube API batch-fetches video titles for all videos in buckets
+4. Success scores calculated relative to best-performing bucket
+5. Response includes full video list with `{ videoId, title, views }` per bucket
+6. UI renders bucket cards with expandable video lists
+
+### Key Features
+- **Relative Scoring**: Success scores compare buckets within channel (not absolute)
+- **Efficient API Usage**: Batched YouTube API calls minimize quota consumption
+- **Real-time Links**: Video titles link directly to YouTube for quick access
+- **Sorted by Performance**: Videos ordered by views to highlight top performers
+
+## Feature: Automated Early Metrics Collection (Cron Jobs)
+
+### Overview
+- Purpose: Automatically capture video performance 3 hours after upload for historical baseline tracking
+- Database: `video_early_metrics` table with scheduled collection system
+- Cron: Vercel Cron runs `/api/early-metrics/collect` every 10 minutes
+
+### Architecture
+- **Detection**: When users visit `/latest-video`, system checks for new videos and schedules 3h collection
+- **Scheduling**: Records created with `status='pending'`, `scheduled_for=published_at + 3h`
+- **Collection**: Cron job processes pending records, fetches metrics from YouTube APIs
+- **Display**: `EarlyMetricsCard` component shows results on `/latest-video` page
+
+### Database Schema (`video_early_metrics`)
+```sql
+CREATE TABLE video_early_metrics (
+  id uuid PRIMARY KEY,
+  user_id uuid NOT NULL,
+  channel_id text NOT NULL,
+  video_id text NOT NULL,
+  video_title text,
+  published_at timestamptz NOT NULL,
+  scheduled_for timestamptz NOT NULL,
+  status text CHECK (status IN ('pending', 'collected', 'failed')),
+  
+  -- Metrics collected at T+3h
+  views_3h int,
+  likes_3h int,
+  comments_3h int,
+  estimated_minutes_watched_3h numeric,
+  subscribers_gained_3h int,
+  
+  collected_at timestamptz,
+  error_message text,
+  UNIQUE(user_id, channel_id, video_id)
+);
+```
+
+### Cron Job Implementation
+- **Endpoint**: `POST /api/early-metrics/collect`
+- **Authentication**: Requires `CRON_SECRET` in Authorization header
+- **Frequency**: Every 10 minutes via Vercel Cron (`vercel.json` configuration)
+- **Batch Processing**: Processes up to 50 videos per run to avoid timeouts
+- **Error Handling**: Failed collections marked with `status='failed'` and error message
+
+### API Endpoints
+- `GET /api/early-metrics?channelId={id}&videoId={id}`: Fetch metrics for specific video
+- `POST /api/early-metrics`: Manually schedule collection (auto-scheduled via `/latest-video`)
+- `POST /api/early-metrics/collect`: Cron job endpoint for batch processing
+
+### UI Integration (`src/components/EarlyMetricsCard.tsx`)
+- **Three States**:
+  - **Pending**: Countdown timer to scheduled collection time
+  - **Collected**: 5 metric tiles (views, likes, comments, watch time, subs gained)
+  - **Failed**: Error message with retry capability
+- **Progress Indicator**: `EarlyMetricsProgress` shows visual countdown
+- **Context Integration**: Metrics available in Neria's context for coaching
+
+### Configuration
+- **Environment**: `CRON_SECRET` required for secure cron job execution
+- **Vercel Setup**: `vercel.json` defines cron schedule
+- **Subscription Gating**: Only schedules for users with active subscriptions
+
+### Data Usage
+- Provides historical baseline for comparing new video performance
+- Tracks early momentum (first 3 hours) as predictor of long-term success
+- Enables comparison across uploads to identify patterns
+- Used by coaching system for early rescue recommendations
+
+### Additional Cron Jobs
+- `POST /api/channel-polling/check-new-videos`: Monitors for new uploads, triggers early metrics scheduling
+- Both cron jobs run every 10 minutes to maintain near-real-time data freshness
