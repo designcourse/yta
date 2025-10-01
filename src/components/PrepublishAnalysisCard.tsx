@@ -24,6 +24,7 @@ export default function PrepublishAnalysisCard({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [reanalyzing, setReanalyzing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,6 +157,7 @@ export default function PrepublishAnalysisCard({
     const interval = setInterval(async () => {
       try {
         const params = new URLSearchParams();
+        if (planId) params.set('planId', planId);
         if (videoId) params.set('videoId', videoId);
         
         const res = await fetch(`/api/videos/prepublish?${params.toString()}`, { cache: 'no-store' });
@@ -169,11 +171,43 @@ export default function PrepublishAnalysisCard({
             analysis_json: json.analysis?.analysis_json ?? null,
           });
           clearInterval(interval);
+          setReanalyzing(false);
         }
       } catch (err) {
         console.error('Poll error:', err);
       }
     }, 3000);
+  };
+
+  const handleReanalyze = async () => {
+    if ((!planId && !videoId) || reanalyzing) return;
+    
+    setReanalyzing(true);
+    setError(null);
+    
+    try {
+      const body: any = {};
+      if (planId) body.planId = planId;
+      if (videoId) body.videoId = videoId;
+      
+      const res = await fetch('/api/videos/prepublish/reanalyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Request failed with status ${res.status}`);
+      }
+      
+      // Update status to analyzing and start polling
+      setData({ status: 'analyzing', analyzed_at: null, summary: null, analysis_json: null });
+      pollStatus();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to start re-analysis');
+      setReanalyzing(false);
+    }
   };
 
   if (!data) {
@@ -276,14 +310,37 @@ export default function PrepublishAnalysisCard({
           <h4 className="text-sm font-semibold text-gray-700">Pre-publish analysis</h4>
           <p className="text-xs text-gray-500">Latest status: <span className="font-medium text-gray-700">{data.status}</span>{data.analyzed_at ? ` • ${new Date(data.analyzed_at).toLocaleString()}` : ''}</p>
         </div>
-        <a
-          href={`/api/videos/prepublish?planId=${encodeURIComponent(planId)}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-indigo-600 hover:text-indigo-700"
-        >
-          View raw JSON →
-        </a>
+        <div className="flex items-center gap-3">
+          {(planId || videoId) && (
+            <button
+              onClick={handleReanalyze}
+              disabled={reanalyzing}
+              className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              {reanalyzing ? (
+                <>
+                  <div className="animate-spin h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full" />
+                  <span>Re-analyzing...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>Re-analyze</span>
+                </>
+              )}
+            </button>
+          )}
+          <a
+            href={`/api/videos/prepublish?${planId ? `planId=${encodeURIComponent(planId)}` : videoId ? `videoId=${encodeURIComponent(videoId)}` : ''}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-indigo-600 hover:text-indigo-700"
+          >
+            View raw JSON →
+          </a>
+        </div>
       </div>
 
       {(hookScore ?? pacingScore ?? energyScore ?? visualScore) !== undefined && (

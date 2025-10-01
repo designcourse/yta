@@ -22,6 +22,26 @@ type ContextBundle = {
       summary: string;
     }>;
   };
+  prepublishAnalysis?: {
+    videoId?: string;
+    planId?: string;
+    analyzedAt: string;
+    scores?: {
+      hook?: number;
+      pacing?: number;
+      energy?: number;
+      visual?: number;
+    };
+    pacing_metrics?: {
+      avg_scene_duration?: number;
+      scene_count?: number;
+      transitions_per_minute?: number;
+    };
+    flatSpots?: Array<{ start: number; end?: number; reason?: string }>;
+    moments?: Array<{ time: number; caption?: string; title?: string }>;
+    summary?: string;
+    transcriptExcerpt?: string;
+  };
   kpis?: {
     videoId: string | null;
     comparable: { count: number; dims: { format?: string | null; lengthBand?: string | null; topicCluster?: string | null }; confidence: string };
@@ -228,6 +248,77 @@ export async function buildNeriaContextBundle(opts: {
     }
   } catch {}
 
+  // Prepublish analysis for latest video (by videoId)
+  try {
+    const vid = bundle.kpis?.videoId;
+    console.log('[Neria][Context] Checking prepublish analysis for videoId:', vid);
+    if (vid) {
+      const ppRes = await fetcher(`${origin}/api/videos/prepublish?videoId=${encodeURIComponent(vid)}`);
+      console.log('[Neria][Context] Prepublish API response status:', ppRes.status);
+      if (ppRes.ok) {
+        const ppData = await ppRes.json();
+        console.log('[Neria][Context] Prepublish data:', { 
+          hasVideo: !!ppData?.video, 
+          status: ppData?.video?.status,
+          hasAnalysis: !!ppData?.analysis,
+          hasAnalysisJson: !!ppData?.analysis?.analysis_json 
+        });
+        if (ppData?.video?.status === 'ready' && ppData?.analysis?.analysis_json) {
+          const aj: any = ppData.analysis.analysis_json;
+          const transcript: any = ppData.analysis.transcript_json;
+          
+          // Extract transcript excerpt (first 500 chars)
+          let transcriptExcerpt: string | undefined;
+          if (transcript?.entries && Array.isArray(transcript.entries)) {
+            const fullText = transcript.entries
+              .map((e: any) => String(e.text || ''))
+              .join(' ')
+              .trim();
+            transcriptExcerpt = fullText.length > 500 ? fullText.slice(0, 497) + '...' : fullText;
+          }
+
+          bundle.prepublishAnalysis = {
+            videoId: vid,
+            planId: ppData.video.plan_id || undefined,
+            analyzedAt: ppData.analysis.created_at || new Date().toISOString(),
+            scores: {
+              hook: aj?.scores?.hook_strength ?? aj?.scores?.hook_score ?? aj?.scores?.hook,
+              pacing: aj?.scores?.pacing_score ?? aj?.scores?.pacing,
+              energy: aj?.scores?.energy_level ?? aj?.scores?.energy,
+              visual: aj?.scores?.visual_engagement ?? aj?.scores?.visual,
+            },
+            pacing_metrics: {
+              avg_scene_duration: aj?.pacing_metrics?.avg_scene_duration,
+              scene_count: aj?.pacing_metrics?.scene_count,
+              transitions_per_minute: aj?.pacing_metrics?.transitions_per_minute,
+            },
+            flatSpots: Array.isArray(aj?.flat_spots)
+              ? aj.flat_spots.map((fs: any) => ({
+                  start: Number(fs.start || 0),
+                  end: fs.end != null ? Number(fs.end) : undefined,
+                  reason: trim(String(fs.reason || fs.description || ''), 150),
+                }))
+              : [],
+            moments: Array.isArray(aj?.moments)
+              ? aj.moments.map((m: any) => ({
+                  time: Number(m.time || m.timestamp || 0),
+                  caption: trim(String(m.caption || m.description || ''), 150),
+                  title: trim(String(m.title || ''), 80),
+                }))
+              : [],
+            summary: trim(ppData.analysis.summary || aj?.summary, 400),
+            transcriptExcerpt,
+          };
+          console.log('[Neria][Context] Prepublish analysis added to bundle for videoId:', vid);
+        }
+      }
+    } else {
+      console.log('[Neria][Context] No videoId found in KPIs, skipping prepublish analysis fetch');
+    }
+  } catch (err) {
+    console.error('[Neria][Context] Error fetching prepublish analysis:', err);
+  }
+
   // Latest experiment (if any)
   try {
     const eRes = await fetcher(`${origin}/api/experiments?channelId=${encodeURIComponent(channelExternalId)}&videoId=${encodeURIComponent(bundle.kpis?.videoId || '')}`);
@@ -246,7 +337,7 @@ export async function buildNeriaContextBundle(opts: {
     }
   } catch {}
 
-  // Next video status + thumbnail/outline completion + script content
+  // Next video status + thumbnail/outline completion + script content + prepublish analysis
   try {
     // Fetch plans to identify which one is marked as next
     const pRes = await fetcher(`${origin}/api/video-plans?channelId=${encodeURIComponent(channelExternalId)}`);
@@ -289,6 +380,63 @@ export async function buildNeriaContextBundle(opts: {
               summary: trim(String(section.summary || ''), 300) || '',
             })),
           };
+        }
+
+        // Fetch prepublish analysis if available (only if not already set from latest video)
+        if (!bundle.prepublishAnalysis) {
+          try {
+            const ppRes = await fetcher(`${origin}/api/videos/prepublish?planId=${encodeURIComponent(next.id)}`);
+            if (ppRes.ok) {
+              const ppData = await ppRes.json();
+              if (ppData?.video?.status === 'ready' && ppData?.analysis?.analysis_json) {
+              const aj: any = ppData.analysis.analysis_json;
+              const transcript: any = ppData.analysis.transcript_json;
+              
+              // Extract transcript excerpt (first 500 chars)
+              let transcriptExcerpt: string | undefined;
+              if (transcript?.entries && Array.isArray(transcript.entries)) {
+                const fullText = transcript.entries
+                  .map((e: any) => String(e.text || ''))
+                  .join(' ')
+                  .trim();
+                transcriptExcerpt = fullText.length > 500 ? fullText.slice(0, 497) + '...' : fullText;
+              }
+
+              bundle.prepublishAnalysis = {
+                videoId: ppData.video.video_id || undefined,
+                planId: String(next.id),
+                analyzedAt: ppData.analysis.created_at || new Date().toISOString(),
+                scores: {
+                  hook: aj?.scores?.hook_strength ?? aj?.scores?.hook_score ?? aj?.scores?.hook,
+                  pacing: aj?.scores?.pacing_score ?? aj?.scores?.pacing,
+                  energy: aj?.scores?.energy_level ?? aj?.scores?.energy,
+                  visual: aj?.scores?.visual_engagement ?? aj?.scores?.visual,
+                },
+                pacing_metrics: {
+                  avg_scene_duration: aj?.pacing_metrics?.avg_scene_duration,
+                  scene_count: aj?.pacing_metrics?.scene_count,
+                  transitions_per_minute: aj?.pacing_metrics?.transitions_per_minute,
+                },
+                flatSpots: Array.isArray(aj?.flat_spots)
+                  ? aj.flat_spots.map((fs: any) => ({
+                      start: Number(fs.start || 0),
+                      end: fs.end != null ? Number(fs.end) : undefined,
+                      reason: trim(String(fs.reason || fs.description || ''), 150),
+                    }))
+                  : [],
+                moments: Array.isArray(aj?.moments)
+                  ? aj.moments.map((m: any) => ({
+                      time: Number(m.time || m.timestamp || 0),
+                      caption: trim(String(m.caption || m.description || ''), 150),
+                      title: trim(String(m.title || ''), 80),
+                    }))
+                  : [],
+                summary: trim(ppData.analysis.summary || aj?.summary, 400),
+                transcriptExcerpt,
+              };
+              }
+            }
+          } catch {}
         }
       }
     }
@@ -401,50 +549,71 @@ export async function formatBundleForSystemPrompt(bundle: ContextBundle): Promis
       steps.push(nv.hasThumbnail ? 'thumbnail=done' : 'thumbnail=pending');
       steps.push(nv.hasOutline ? 'outline=done' : 'outline=pending');
       lines.push(`NEXT VIDEO: ${nv.title || '(untitled)'} [${steps.join(', ')}]`);
-      // Attempt to enrich with prepublish analysis summary (optional)
-      try {
-        if (nv.planId) {
-          const admin = createSupabaseAdminClient();
-          const { data: vids } = await admin
-            .from('prepublish_videos')
-            .select('id')
-            .eq('plan_id', nv.planId)
-            .order('uploaded_at', { ascending: false })
-            .limit(1);
-          const vidId = vids?.[0]?.id;
-          if (vidId) {
-            const { data: a } = await admin
-              .from('prepublish_analyses')
-              .select('analysis_json')
-              .eq('prepublish_video_id', vidId)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            const aj: any = a?.analysis_json || null;
-            if (aj?.scores) {
-              const hook = aj.scores.hook_strength;
-              const pacing = aj.scores.pacing;
-              const energy = aj.scores.energy;
-              const ve = aj.scores.visual_engagement;
-              const parts: string[] = [];
-              if (hook != null) parts.push(`hook=${Number(hook).toFixed(1)}`);
-              if (pacing != null) parts.push(`pacing=${Number(pacing).toFixed(1)}`);
-              if (energy != null) parts.push(`energy=${Number(energy).toFixed(1)}`);
-              if (ve != null) parts.push(`visual=${Number(ve).toFixed(1)}`);
-              if (parts.length) lines.push(`Prepublish Scores: ${parts.join(', ')}`);
-              const firstFlat = Array.isArray(aj.flat_spots) && aj.flat_spots[0]
-                ? `Flat spot near @${Math.round(aj.flat_spots[0].start || 0)}s`
-                : '';
-              const firstMoment = Array.isArray(aj.moments) && aj.moments[0]
-                ? `Strong moment @${Math.round(aj.moments[0].time || 0)}s`
-                : '';
-              const hints = [firstFlat, firstMoment].filter(Boolean).join(' | ');
-              if (hints) lines.push(hints);
-            }
-          }
-        }
-      } catch {}
     }
+  }
+  
+  // Prepublish analysis section (comprehensive data)
+  if (bundle.prepublishAnalysis) {
+    const pa = bundle.prepublishAnalysis;
+    lines.push('');
+    lines.push('PREPUBLISH VIDEO ANALYSIS (Gemini review of rough cut):');
+    
+    // Scores
+    if (pa.scores && Object.keys(pa.scores).length > 0) {
+      const scoreParts: string[] = [];
+      if (pa.scores.hook != null) scoreParts.push(`hook=${Number(pa.scores.hook).toFixed(1)}/10`);
+      if (pa.scores.pacing != null) scoreParts.push(`pacing=${Number(pa.scores.pacing).toFixed(1)}/10`);
+      if (pa.scores.energy != null) scoreParts.push(`energy=${Number(pa.scores.energy).toFixed(1)}/10`);
+      if (pa.scores.visual != null) scoreParts.push(`visual=${Number(pa.scores.visual).toFixed(1)}/10`);
+      if (scoreParts.length) lines.push(`Scores: ${scoreParts.join(', ')}`);
+    }
+    
+    // Pacing metrics
+    if (pa.pacing_metrics) {
+      const pm = pa.pacing_metrics;
+      const pmParts: string[] = [];
+      if (pm.avg_scene_duration != null) pmParts.push(`avg scene ${Number(pm.avg_scene_duration).toFixed(1)}s`);
+      if (pm.scene_count != null) pmParts.push(`${pm.scene_count} scenes`);
+      if (pm.transitions_per_minute != null) pmParts.push(`${Number(pm.transitions_per_minute).toFixed(1)} transitions/min`);
+      if (pmParts.length) lines.push(`Pacing: ${pmParts.join(', ')}`);
+    }
+    
+    // Flat spots (problem areas)
+    if (pa.flatSpots && pa.flatSpots.length > 0) {
+      lines.push(`Flat Spots (${pa.flatSpots.length} identified):`);
+      pa.flatSpots.slice(0, 5).forEach((fs, idx) => {
+        const timeRange = fs.end != null ? `${Math.round(fs.start)}s-${Math.round(fs.end)}s` : `@${Math.round(fs.start)}s`;
+        const reason = fs.reason ? `: ${fs.reason}` : '';
+        lines.push(`  ${idx + 1}. ${timeRange}${reason}`);
+      });
+      if (pa.flatSpots.length > 5) {
+        lines.push(`  ... and ${pa.flatSpots.length - 5} more`);
+      }
+    }
+    
+    // Highlight moments (strong points)
+    if (pa.moments && pa.moments.length > 0) {
+      lines.push(`Strong Moments (${pa.moments.length} identified):`);
+      pa.moments.slice(0, 5).forEach((m, idx) => {
+        const desc = m.caption || m.title || 'Engaging moment';
+        lines.push(`  ${idx + 1}. @${Math.round(m.time)}s: ${desc}`);
+      });
+      if (pa.moments.length > 5) {
+        lines.push(`  ... and ${pa.moments.length - 5} more`);
+      }
+    }
+    
+    // Summary
+    if (pa.summary) {
+      lines.push(`Summary: ${pa.summary}`);
+    }
+    
+    // Transcript excerpt
+    if (pa.transcriptExcerpt) {
+      lines.push(`Transcript Excerpt: "${pa.transcriptExcerpt}"`);
+    }
+    
+    lines.push('');
   }
   // Script content (if available)
   if (bundle.script && Array.isArray(bundle.script.sections) && bundle.script.sections.length > 0) {
@@ -524,6 +693,11 @@ export async function formatBundleForSystemPrompt(bundle: ContextBundle): Promis
   if (bundle.script && Array.isArray(bundle.script.sections) && bundle.script.sections.length > 0) {
     lines.push('- When users ask about their script or next video, reference the SCRIPT OUTLINE provided above with specific section titles and summaries.');
     lines.push('- Provide feedback on script structure, pacing, section content, and timing based on the outlined sections.');
+  }
+  if (bundle.prepublishAnalysis) {
+    lines.push('- When discussing the next video, reference the PREPUBLISH VIDEO ANALYSIS data including scores, flat spots, and strong moments.');
+    lines.push('- Use prepublish analysis to provide pre-launch coaching: suggest edits to fix flat spots, enhance strong moments, improve pacing.');
+    lines.push('- Compare prepublish scores to expected performance based on comparable baselines when advising on readiness to publish.');
   }
   
   return lines.join('\n');
@@ -609,6 +783,82 @@ export async function patchNeriaContextNextVideo(internalChannelId: string, next
     } else {
       // Clear script if outline not available
       delete base.script;
+    }
+    
+    // Fetch prepublish analysis if available
+    try {
+      const admin = createSupabaseAdminClient();
+      const { data: vids } = await admin
+        .from('prepublish_videos')
+        .select('id, video_id, status')
+        .eq('plan_id', next.planId)
+        .order('uploaded_at', { ascending: false })
+        .limit(1);
+      
+      if (vids?.[0]?.status === 'ready') {
+        const vidId = vids[0].id;
+        const { data: analysis } = await admin
+          .from('prepublish_analyses')
+          .select('analysis_json, transcript_json, summary, created_at')
+          .eq('prepublish_video_id', vidId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        
+        if (analysis?.analysis_json) {
+          const aj: any = analysis.analysis_json;
+          const transcript: any = analysis.transcript_json;
+          
+          // Extract transcript excerpt (first 500 chars)
+          let transcriptExcerpt: string | undefined;
+          if (transcript?.entries && Array.isArray(transcript.entries)) {
+            const fullText = transcript.entries
+              .map((e: any) => String(e.text || ''))
+              .join(' ')
+              .trim();
+            transcriptExcerpt = fullText.length > 500 ? fullText.slice(0, 497) + '...' : fullText;
+          }
+
+          base.prepublishAnalysis = {
+            videoId: vids[0].video_id || undefined,
+            planId: next.planId,
+            analyzedAt: analysis.created_at || new Date().toISOString(),
+            scores: {
+              hook: aj?.scores?.hook_strength ?? aj?.scores?.hook_score ?? aj?.scores?.hook,
+              pacing: aj?.scores?.pacing_score ?? aj?.scores?.pacing,
+              energy: aj?.scores?.energy_level ?? aj?.scores?.energy,
+              visual: aj?.scores?.visual_engagement ?? aj?.scores?.visual,
+            },
+            pacing_metrics: {
+              avg_scene_duration: aj?.pacing_metrics?.avg_scene_duration,
+              scene_count: aj?.pacing_metrics?.scene_count,
+              transitions_per_minute: aj?.pacing_metrics?.transitions_per_minute,
+            },
+            flatSpots: Array.isArray(aj?.flat_spots)
+              ? aj.flat_spots.map((fs: any) => ({
+                  start: Number(fs.start || 0),
+                  end: fs.end != null ? Number(fs.end) : undefined,
+                  reason: trim(String(fs.reason || fs.description || ''), 150),
+                }))
+              : [],
+            moments: Array.isArray(aj?.moments)
+              ? aj.moments.map((m: any) => ({
+                  time: Number(m.time || m.timestamp || 0),
+                  caption: trim(String(m.caption || m.description || ''), 150),
+                  title: trim(String(m.title || ''), 80),
+                }))
+              : [],
+            summary: trim(analysis.summary || aj?.summary, 400),
+            transcriptExcerpt,
+          };
+        } else {
+          delete base.prepublishAnalysis;
+        }
+      } else {
+        delete base.prepublishAnalysis;
+      }
+    } catch {
+      delete base.prepublishAnalysis;
     }
     
     base.refreshedAt = base.refreshedAt || new Date().toISOString();

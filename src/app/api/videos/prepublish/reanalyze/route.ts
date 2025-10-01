@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getS3Client, getBucketName } from "@/utils/s3";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { invalidateNeriaContextCache } from "@/utils/neria-context";
 
 // Helper to read stream to buffer
 async function readStreamToBuffer(stream: any): Promise<Buffer> {
@@ -84,7 +85,7 @@ Return compact JSON only (no prose) with:
       { text: instruction },
       { fileData: { fileUri, mimeType: mime } }
     ]}],
-    generationConfig: { response_mime_type: 'application/json', maxOutputTokens: 8192, temperature: 0.4 }
+    generationConfig: { response_mime_type: 'application/json', maxOutputTokens: 8192, temperature: 0 }
   };
   const res = await fetch(url + `?key=${encodeURIComponent(apiKey)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`Gemini analyze error: ${res.status} ${await res.text()}`);
@@ -148,6 +149,26 @@ export async function POST(request: Request) {
         const analysis = await analyzeWithGemini({ fileUri: uploaded.uri, mime: row.mime });
         await admin.from('prepublish_analyses').insert({ prepublish_video_id: targetId, model: 'gemini-2.5-pro', summary: analysis?.summary || null, analysis_json: analysis || {}, transcript_json: analysis?.transcript || null });
         await admin.from('prepublish_videos').update({ status: 'ready', analyzed_at: new Date().toISOString() }).eq('id', targetId);
+        
+        // Invalidate Neria context cache so analysis is available immediately
+        const { data: videoData } = await admin
+          .from("prepublish_videos")
+          .select("channel_id")
+          .eq("id", targetId)
+          .maybeSingle();
+        
+        if (videoData?.channel_id) {
+          // Get internal channel ID from external channel_id
+          const { data: channelRow } = await admin
+            .from("channels")
+            .select("id")
+            .eq("channel_id", videoData.channel_id)
+            .maybeSingle();
+          
+          if (channelRow?.id) {
+            await invalidateNeriaContextCache(channelRow.id);
+          }
+        }
       } catch (e: any) {
         await admin.from('prepublish_videos').update({ status: 'error', error: String(e?.message || e) }).eq('id', targetId);
       }

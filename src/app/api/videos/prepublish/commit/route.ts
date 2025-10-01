@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
 import { getBucketName, getS3Client } from "@/utils/s3";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { invalidateNeriaContextCache } from "@/utils/neria-context";
 
 async function uploadToGeminiFromS3(params: { body: any; mime: string; sizeBytes?: number; fileName?: string; }): Promise<{ name: string; uri: string; }> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -138,7 +139,7 @@ Return compact JSON only (no prose) with:
       ]}
     ],
     generationConfig: {
-      temperature: 0.4,
+      temperature: 0,
       response_mime_type: "application/json",
       response_schema: responseSchema,
       maxOutputTokens: 8192,
@@ -257,6 +258,26 @@ export async function POST(request: Request) {
           .from("prepublish_videos")
           .update({ status: "ready", analyzed_at: new Date().toISOString() })
           .eq("id", preId);
+        
+        // Get internal channel ID to invalidate Neria context cache
+        const { data: videoData } = await admin
+          .from("prepublish_videos")
+          .select("channel_id")
+          .eq("id", preId)
+          .maybeSingle();
+        
+        if (videoData?.channel_id) {
+          // Get internal channel ID from external channel_id
+          const { data: channelRow } = await admin
+            .from("channels")
+            .select("id")
+            .eq("channel_id", videoData.channel_id)
+            .maybeSingle();
+          
+          if (channelRow?.id) {
+            await invalidateNeriaContextCache(channelRow.id);
+          }
+        }
         // Best-effort cleanup of remote Gemini file to reduce footprint
         if (apiKey) {
           try {
