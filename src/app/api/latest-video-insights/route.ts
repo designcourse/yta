@@ -155,113 +155,209 @@ export async function GET(request: Request) {
     const tokenResult = await getValidAccessToken(user.id, channelId);
     if (!tokenResult.success) return NextResponse.json({ error: tokenResult.error || "No YouTube access" }, { status: 400 });
 
-    // Get duration
-    const videoRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${snap.video_id}`, {
-      headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
-    });
+    // Check if retention data is already cached in database
+    const { data: cachedRetention } = await admin
+      .from("video_retention_data")
+      .select("duration_sec, retention_rows, fetched_at")
+      .eq("user_id", user.id)
+      .eq("channel_id", channelId)
+      .eq("video_id", snap.video_id)
+      .single();
+
     let durationSec = 0;
-    if (videoRes.ok) {
-      const vd = await videoRes.json();
-      durationSec = parseISODurationToSeconds(vd?.items?.[0]?.contentDetails?.duration || "");
-    }
+    let rows: any[] = [];
 
-    // Retention (audienceWatchRatio + relativeRetentionPerformance)
-    const startDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const endDate = new Date().toISOString().slice(0, 10);
-    const params = new URLSearchParams({
-      ids: `channel==${channelId}`,
-      startDate,
-      endDate,
-      metrics: "audienceWatchRatio,relativeRetentionPerformance",
-      dimensions: "elapsedVideoTimeRatio",
-      filters: `video==${snap.video_id}`,
-      sort: "elapsedVideoTimeRatio",
-    });
-    let retentionRes = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
-    });
-    if (!retentionRes.ok) {
-      const alt = new URLSearchParams(params); alt.set("ids", "channel==MINE");
-      retentionRes = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${alt.toString()}`, {
+    if (cachedRetention) {
+      // Use cached data
+      console.log('[Insights][Retention] Using cached retention data', { videoId: snap.video_id, fetchedAt: cachedRetention.fetched_at });
+      durationSec = cachedRetention.duration_sec;
+      rows = cachedRetention.retention_rows || [];
+    } else {
+      // Fetch from YouTube API
+      console.log('[Insights][Retention] Fetching fresh retention data from YouTube API', { videoId: snap.video_id });
+
+      // Get duration
+      const videoRes = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${snap.video_id}`, {
         headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
       });
-    }
-    const retention = retentionRes.ok ? await retentionRes.json() : null;
-    const rows: any[] = Array.isArray(retention?.rows) ? retention!.rows : [];
+      if (videoRes.ok) {
+        const vd = await videoRes.json();
+        durationSec = parseISODurationToSeconds(vd?.items?.[0]?.contentDetails?.duration || "");
+      }
 
-    // Captions: get first track and download VTT if possible
-    let cues: Array<{ start: number; end: number; text: string }> = [];
-    try {
-      const capsList = await fetch(`https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${snap.video_id}`, {
+      // Retention (audienceWatchRatio + relativeRetentionPerformance)
+      const startDate = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const endDate = new Date().toISOString().slice(0, 10);
+      const params = new URLSearchParams({
+        ids: `channel==${channelId}`,
+        startDate,
+        endDate,
+        metrics: "audienceWatchRatio,relativeRetentionPerformance",
+        dimensions: "elapsedVideoTimeRatio",
+        filters: `video==${snap.video_id}`,
+        sort: "elapsedVideoTimeRatio",
+      });
+      let retentionRes = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${params.toString()}`, {
         headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
       });
-      if (capsList.ok) {
-        const caps = await capsList.json();
-        const items = Array.isArray(caps?.items) ? caps.items : [];
-        try { console.log('[Insights][Captions] captions.list ok', { videoId: snap.video_id, items: items.length }); } catch {}
-        // Choose best track: prefer English standard, then English ASR, else first
-        const preferred = (items as any[]).find(i => i?.snippet?.language?.toLowerCase?.().startsWith('en') && i?.snippet?.trackKind !== 'asr')
-          || (items as any[]).find(i => i?.snippet?.language?.toLowerCase?.().startsWith('en'))
-          || items[0];
-        const trackId = preferred?.id;
-        const lang = preferred?.snippet?.language as string | undefined;
-        const trackKind = preferred?.snippet?.trackKind as string | undefined;
-        if (trackId) {
-          const params = new URLSearchParams({ tfmt: 'vtt' });
-          // If not English, request server-side translation to English
-          if (!lang || !lang.toLowerCase().startsWith('en')) params.set('tlang', 'en');
-          const capRes = await fetch(`https://www.googleapis.com/youtube/v3/captions/${trackId}?${params.toString()}`, {
-            headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
-          });
-          if (capRes.ok) {
-            const vtt = await capRes.text();
-            cues = parseVtt(vtt).map(c => ({ ...c, text: cleanCaptionText(c.text) })).filter(c => c.text.length > 0);
-            try { console.log('[Insights][Captions] captions.download ok', { trackId, vttChars: vtt.length, cueCount: cues.length, lang, trackKind }); } catch {}
-          } else {
-            try { console.log('[Insights][Captions] captions.download failed', { trackId, status: capRes.status, statusText: capRes.statusText }); } catch {}
-          }
+      if (!retentionRes.ok) {
+        const alt = new URLSearchParams(params); alt.set("ids", "channel==MINE");
+        retentionRes = await fetch(`https://youtubeanalytics.googleapis.com/v2/reports?${alt.toString()}`, {
+          headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
+        });
+      }
+      const retention = retentionRes.ok ? await retentionRes.json() : null;
+      rows = Array.isArray(retention?.rows) ? retention!.rows : [];
+
+      // Save to database if we got retention data
+      if (rows.length > 0 && durationSec > 0) {
+        try {
+          await admin
+            .from("video_retention_data")
+            .upsert({
+              user_id: user.id,
+              channel_id: channelId,
+              video_id: snap.video_id,
+              duration_sec: durationSec,
+              retention_rows: rows,
+            }, { onConflict: 'user_id,channel_id,video_id' });
+          console.log('[Insights][Retention] Saved retention data to cache', { videoId: snap.video_id, rowCount: rows.length });
+        } catch (e: any) {
+          console.error('[Insights][Retention] Failed to cache retention data', e?.message || e);
         }
-      } else {
-        try { console.log('[Insights][Captions] captions.list failed', { videoId: snap.video_id, status: capsList.status, statusText: capsList.statusText }); } catch {}
       }
-    } catch (e: any) { try { console.log('[Insights][Captions] captions API error', e?.message || e); } catch {} }
+    }
 
-    // Fallback to public timedtext endpoint if API download fails or returns no cues
-    if (cues.length === 0) {
-      const candidates = [
-        `https://www.youtube.com/api/timedtext?fmt=vtt&lang=en&v=${snap.video_id}`,
-        `https://www.youtube.com/api/timedtext?fmt=vtt&lang=en-US&v=${snap.video_id}`,
-        `https://www.youtube.com/api/timedtext?fmt=vtt&lang=en&kind=asr&v=${snap.video_id}`,
-      ];
-      for (const url of candidates) {
-        try {
-          const r = await fetch(url);
-          if (r.ok) {
-            const vtt = await r.text();
-            const parsed = parseVtt(vtt).map(c => ({ ...c, text: cleanCaptionText(c.text) })).filter(c => c.text.length > 0);
-            try { console.log('[Insights][Captions] timedtext ok', { url, vttChars: vtt.length, cueCount: parsed.length }); } catch {}
-            if (parsed.length > 0) { cues = parsed; break; }
-          } else {
-            try { console.log('[Insights][Captions] timedtext failed', { url, status: r.status, statusText: r.statusText }); } catch {}
-          }
-        } catch (e: any) { try { console.log('[Insights][Captions] timedtext error', { url, error: e?.message || String(e) }); } catch {} }
-      }
-      // If still empty, discover tracks via type=list and fetch accordingly
-      if (cues.length === 0) {
-        try {
-          const listRes = await fetch(`https://www.youtube.com/api/timedtext?type=list&v=${snap.video_id}`);
-          if (listRes.ok) {
-            const xml = await listRes.text();
-            try { console.log('[Insights][Captions] timedtext list ok'); } catch {}
-            const tracks = parseTrackList(xml);
-            for (const tr of tracks) {
-              const got = (await fetchTimedtextByTrack(snap.video_id, tr)).map(c => ({ ...c, text: cleanCaptionText(c.text) })).filter(c => c.text.length > 0);
-              if (got.length > 0) { cues = got; break; }
+    // Check if transcript is already cached in database
+    const { data: cachedTranscript } = await admin
+      .from("video_transcripts_cache")
+      .select("cues, source, language, track_kind, fetched_at")
+      .eq("user_id", user.id)
+      .eq("channel_id", channelId)
+      .eq("video_id", snap.video_id)
+      .single();
+
+    let cues: Array<{ start: number; end: number; text: string }> = [];
+    let transcriptSource: string | undefined;
+    let transcriptLang: string | undefined;
+    let transcriptTrackKind: string | undefined;
+
+    if (cachedTranscript && Array.isArray(cachedTranscript.cues)) {
+      // Use cached transcript
+      console.log('[Insights][Captions] Using cached transcript', { videoId: snap.video_id, cueCount: cachedTranscript.cues.length, fetchedAt: cachedTranscript.fetched_at, source: cachedTranscript.source });
+      cues = cachedTranscript.cues;
+    } else {
+      // Fetch fresh transcript
+      console.log('[Insights][Captions] Fetching fresh transcript from APIs', { videoId: snap.video_id });
+
+      // Captions: get first track and download VTT if possible
+      try {
+        const capsList = await fetch(`https://www.googleapis.com/youtube/v3/captions?part=snippet&videoId=${snap.video_id}`, {
+          headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
+        });
+        if (capsList.ok) {
+          const caps = await capsList.json();
+          const items = Array.isArray(caps?.items) ? caps.items : [];
+          try { console.log('[Insights][Captions] captions.list ok', { videoId: snap.video_id, items: items.length }); } catch {}
+          // Choose best track: prefer English standard, then English ASR, else first
+          const preferred = (items as any[]).find(i => i?.snippet?.language?.toLowerCase?.().startsWith('en') && i?.snippet?.trackKind !== 'asr')
+            || (items as any[]).find(i => i?.snippet?.language?.toLowerCase?.().startsWith('en'))
+            || items[0];
+          const trackId = preferred?.id;
+          const lang = preferred?.snippet?.language as string | undefined;
+          const trackKind = preferred?.snippet?.trackKind as string | undefined;
+          if (trackId) {
+            const params = new URLSearchParams({ tfmt: 'vtt' });
+            // If not English, request server-side translation to English
+            if (!lang || !lang.toLowerCase().startsWith('en')) params.set('tlang', 'en');
+            const capRes = await fetch(`https://www.googleapis.com/youtube/v3/captions/${trackId}?${params.toString()}`, {
+              headers: { Authorization: `Bearer ${tokenResult.accessToken}` }
+            });
+            if (capRes.ok) {
+              const vtt = await capRes.text();
+              cues = parseVtt(vtt).map(c => ({ ...c, text: cleanCaptionText(c.text) })).filter(c => c.text.length > 0);
+              transcriptSource = 'captions_api';
+              transcriptLang = lang;
+              transcriptTrackKind = trackKind;
+              try { console.log('[Insights][Captions] captions.download ok', { trackId, vttChars: vtt.length, cueCount: cues.length, lang, trackKind }); } catch {}
+            } else {
+              try { console.log('[Insights][Captions] captions.download failed', { trackId, status: capRes.status, statusText: capRes.statusText }); } catch {}
             }
-          } else {
-            try { console.log('[Insights][Captions] timedtext list failed', { status: listRes.status }); } catch {}
           }
-        } catch (e: any) { try { console.log('[Insights][Captions] timedtext list error', e?.message || e); } catch {} }
+        } else {
+          try { console.log('[Insights][Captions] captions.list failed', { videoId: snap.video_id, status: capsList.status, statusText: capsList.statusText }); } catch {}
+        }
+      } catch (e: any) { try { console.log('[Insights][Captions] captions API error', e?.message || e); } catch {} }
+
+      // Fallback to public timedtext endpoint if API download fails or returns no cues
+      if (cues.length === 0) {
+        const candidates = [
+          `https://www.youtube.com/api/timedtext?fmt=vtt&lang=en&v=${snap.video_id}`,
+          `https://www.youtube.com/api/timedtext?fmt=vtt&lang=en-US&v=${snap.video_id}`,
+          `https://www.youtube.com/api/timedtext?fmt=vtt&lang=en&kind=asr&v=${snap.video_id}`,
+        ];
+        for (const url of candidates) {
+          try {
+            const r = await fetch(url);
+            if (r.ok) {
+              const vtt = await r.text();
+              const parsed = parseVtt(vtt).map(c => ({ ...c, text: cleanCaptionText(c.text) })).filter(c => c.text.length > 0);
+              try { console.log('[Insights][Captions] timedtext ok', { url, vttChars: vtt.length, cueCount: parsed.length }); } catch {}
+              if (parsed.length > 0) {
+                cues = parsed;
+                transcriptSource = 'timedtext';
+                transcriptLang = url.includes('lang=en-US') ? 'en-US' : 'en';
+                transcriptTrackKind = url.includes('kind=asr') ? 'asr' : undefined;
+                break;
+              }
+            } else {
+              try { console.log('[Insights][Captions] timedtext failed', { url, status: r.status, statusText: r.statusText }); } catch {}
+            }
+          } catch (e: any) { try { console.log('[Insights][Captions] timedtext error', { url, error: e?.message || String(e) }); } catch {} }
+        }
+        // If still empty, discover tracks via type=list and fetch accordingly
+        if (cues.length === 0) {
+          try {
+            const listRes = await fetch(`https://www.youtube.com/api/timedtext?type=list&v=${snap.video_id}`);
+            if (listRes.ok) {
+              const xml = await listRes.text();
+              try { console.log('[Insights][Captions] timedtext list ok'); } catch {}
+              const tracks = parseTrackList(xml);
+              for (const tr of tracks) {
+                const got = (await fetchTimedtextByTrack(snap.video_id, tr)).map(c => ({ ...c, text: cleanCaptionText(c.text) })).filter(c => c.text.length > 0);
+                if (got.length > 0) {
+                  cues = got;
+                  transcriptSource = 'timedtext_fallback';
+                  transcriptLang = tr.lang_code;
+                  transcriptTrackKind = tr.kind;
+                  break;
+                }
+              }
+            } else {
+              try { console.log('[Insights][Captions] timedtext list failed', { status: listRes.status }); } catch {}
+            }
+          } catch (e: any) { try { console.log('[Insights][Captions] timedtext list error', e?.message || e); } catch {} }
+        }
+      }
+
+      // Save to database if we got transcript data
+      if (cues.length > 0) {
+        try {
+          await admin
+            .from("video_transcripts_cache")
+            .upsert({
+              user_id: user.id,
+              channel_id: channelId,
+              video_id: snap.video_id,
+              cues: cues,
+              source: transcriptSource || 'unknown',
+              language: transcriptLang || null,
+              track_kind: transcriptTrackKind || null,
+            }, { onConflict: 'user_id,channel_id,video_id' });
+          console.log('[Insights][Captions] Saved transcript to cache', { videoId: snap.video_id, cueCount: cues.length, source: transcriptSource });
+        } catch (e: any) {
+          console.error('[Insights][Captions] Failed to cache transcript', e?.message || e);
+        }
       }
     }
 

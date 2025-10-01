@@ -380,13 +380,12 @@ export default function PrepublishAnalysisCard({
         <div className="space-y-2">
           <p className="text-sm font-semibold text-gray-700">Flat spots to tighten</p>
           <ul className="space-y-1 text-xs text-gray-600">
-            {flatSpots.slice(0, 4).map((spot, idx) => (
+            {flatSpots.map((spot, idx) => (
               <li key={idx} className="bg-gray-50 rounded px-2 py-1">
                 <span className="font-medium text-gray-700">{formatTime(parseTime(spot.start_sec ?? spot.start ?? spot.begin ?? spot.time))}–{formatTime(parseTime(spot.end_sec ?? spot.end ?? spot.finish))}</span>
                 {spot.reason ? ` • ${spot.reason}` : ''}
               </li>
             ))}
-            {flatSpots.length > 4 && <li className="text-gray-400">+{flatSpots.length - 4} more</li>}
           </ul>
         </div>
       )}
@@ -395,13 +394,12 @@ export default function PrepublishAnalysisCard({
         <div className="space-y-2">
           <p className="text-sm font-semibold text-gray-700">Highlight moments</p>
           <ul className="space-y-1 text-xs text-gray-600">
-            {moments.slice(0, 4).map((moment, idx) => (
+            {moments.map((moment, idx) => (
               <li key={idx} className="bg-indigo-50 rounded px-2 py-1">
                 <span className="font-medium text-indigo-700">{formatTime(moment.time)}</span>
                 {moment.label ? ` • ${moment.label}` : ""}
               </li>
             ))}
-            {moments.length > 4 && <li className="text-indigo-300">+{moments.length - 4} more</li>}
           </ul>
         </div>
       )}

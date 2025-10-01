@@ -75,7 +75,7 @@ Return compact JSON only (no prose) with:
 - scores (0-10): hook_strength, pacing, energy, visual_engagement
 - metrics: words_per_minute, cuts_per_minute, average_shot_length_sec, slow_start_sec, pause_segments[]
 - flat_spots[]: timestamp ranges likely to lose viewers with a short reason. IMPORTANT: start and end must be in TOTAL SECONDS from video start (e.g., 65 for 1:05, 245 for 4:05), NOT minutes or mm:ss format.
-- moments[]: 3-7 highlight moments with suggested lower-third captions. IMPORTANT: time must be in TOTAL SECONDS from video start.
+- moments[]: Identify ALL significant highlight moments throughout the ENTIRE video duration with suggested lower-third captions. CRITICAL REQUIREMENT: You MUST analyze and identify moments from the BEGINNING, MIDDLE, and END of the video. Time values must be in TOTAL SECONDS from video start. For a 7-minute video, you should have moments spanning from 0 seconds to 420 seconds. For a 10-minute video, moments should span 0-600 seconds. Identify every content shift, demonstration, reveal, problem solution, visual change, or teaching point throughout the full timeline. Do not cluster all moments at the beginning - ensure even distribution across the entire video length.
 - transcript[]: coarse transcript segments. IMPORTANT: start and end must be in TOTAL SECONDS from video start.
 - summary: one-paragraph summary of the main improvement areas.
 `;

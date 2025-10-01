@@ -21,8 +21,20 @@ export async function refreshGoogleToken(userId: string, refreshToken: string, g
 
     if (!response.ok) {
       const error = await response.text();
-      console.error("Token refresh failed:", error);
-      return { accessToken: "", success: false, error: "Token refresh failed" };
+      console.error("Token refresh failed:", error, "for google_sub:", googleSub);
+      
+      // If refresh token is invalid, mark the account as needing reconnection
+      if (response.status === 400) {
+        const admin = createSupabaseAdminClient();
+        if (googleSub) {
+          await admin.from("google_accounts").update({
+            access_token: null,
+            refresh_token: null,
+          }).eq("user_id", userId).eq("google_sub", googleSub);
+        }
+      }
+      
+      return { accessToken: "", success: false, error: "Token refresh failed - please reconnect your YouTube account" };
     }
 
     const tokens = await response.json();
@@ -117,13 +129,25 @@ export async function getValidAccessToken(userId: string, channelId?: string): P
     };
   }
 
-  // Try to use the current access token first
+  // Try to use the current access token first - validate it has YouTube Analytics scope
   const testResponse = await fetch(
     "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" + googleAccount.access_token
   );
 
   if (testResponse.ok) {
-    // Token is still valid
+    const tokenInfo = await testResponse.json();
+    const scopes = tokenInfo.scope || "";
+    
+    // Check for YouTube Analytics scope (full URL format)
+    const hasYouTubeAnalytics = scopes.includes("yt-analytics.readonly") || scopes.includes("youtube.readonly");
+    
+    if (!hasYouTubeAnalytics) {
+      console.warn("⚠️ Token may be missing YouTube Analytics scope:", scopes);
+      // Don't fail here - let the actual API call determine if permissions are missing
+      // This prevents false positives from scope string format variations
+    }
+    
+    // Token is valid - return it even if scope check is uncertain
     return { accessToken: googleAccount.access_token, success: true };
   }
 

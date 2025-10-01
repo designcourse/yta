@@ -35,10 +35,9 @@ export default function YouTubeConnectPage() {
       client_id: clientId,
       redirect_uri: `${window.location.origin}/youtube-callback`,
       response_type: "code",
-      scope: "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
+      scope: "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
       access_type: "offline",
-      prompt: "consent", // Reverting to 'consent' for another attempt at forcing a fresh screen
-      // include_granted_scopes: "true", // Temporarily removed to force fresh consent
+      prompt: "consent",
       state: currentUserId, // Pass the current user ID
     });
 

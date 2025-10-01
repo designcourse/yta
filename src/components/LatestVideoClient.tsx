@@ -5,6 +5,7 @@ import LastVideoContainer from "@/components/LastVideoContainer";
 import EarlyMetricsCard from "@/components/EarlyMetricsCard";
 import EarlyMetricsProgress from "@/components/EarlyMetricsProgress";
 import PrepublishAnalysisCard from "@/components/PrepublishAnalysisCard";
+import RetentionChart from "@/components/RetentionChart";
 import { useEffect, useState } from "react";
 
 interface VideoData {
@@ -35,6 +36,16 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
   const [kpis, setKpis] = useState<any | null>(null);
   const [kpisLoading, setKpisLoading] = useState(false);
   const [dismissRescue, setDismissRescue] = useState(false);
+  const [retentionData, setRetentionData] = useState<{ 
+    retention: Array<[string, number, number?]>; 
+    durationSec: number;
+    insights?: Array<{ time: number | string; pct: number; insight: string; suggestion: string }>;
+  } | null>(null);
+  const [retentionLoading, setRetentionLoading] = useState(false);
+  const [prepublishData, setPrepublishData] = useState<{
+    highlightMoments?: Array<{ time: number | string; caption?: string; title?: string }>;
+    flatSpots?: Array<{ time: string; duration?: string; issue?: string }>;
+  } | null>(null);
 
   useEffect(() => {
     if (channelId) {
@@ -76,8 +87,12 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
       setBucketInfo(data.bucket);
       setOriginalBucketInfo(data.bucket);
       setTimeout(() => setShowContainer(true), 50);
-      // Load KPIs after snapshot available
+      // Load KPIs and retention after snapshot available
       fetchKpis();
+      fetchRetention();
+      if (data.video?.video_id) {
+        fetchPrepublish(data.video.video_id);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
       console.error('Error fetching latest video:', err);
@@ -116,6 +131,90 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
       });
     } finally {
       setKpisLoading(false);
+    }
+  };
+
+  const fetchRetention = async (overrideVideoId?: string | null) => {
+    if (!channelId) return;
+    try {
+      setRetentionLoading(true);
+      setRetentionData(null);
+      const id = overrideVideoId !== undefined ? overrideVideoId : selectedVideoId;
+      const url = id
+        ? `/api/latest-video-insights?channelId=${encodeURIComponent(channelId)}&videoId=${encodeURIComponent(id)}`
+        : `/api/latest-video-insights?channelId=${encodeURIComponent(channelId)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const j = await res.json();
+        if (j.retention && Array.isArray(j.retention) && j.retention.length > 0 && j.durationSec) {
+          setRetentionData({ 
+            retention: j.retention, 
+            durationSec: j.durationSec,
+            insights: Array.isArray(j.insights) ? j.insights : undefined
+          });
+        } else {
+          setRetentionData(null);
+        }
+      } else {
+        setRetentionData(null);
+      }
+    } catch (error) {
+      console.error('Error fetching retention:', error);
+      setRetentionData(null);
+    } finally {
+      setRetentionLoading(false);
+    }
+  };
+
+  const fetchPrepublish = async (videoId: string) => {
+    try {
+      console.log('[Prepublish] Fetching for videoId:', videoId);
+      const res = await fetch(`/api/videos/prepublish?videoId=${videoId}`, { cache: "no-store" });
+      if (res.ok) {
+        const j = await res.json();
+        console.log('[Prepublish] API response:', j);
+        if (j.analysis?.analysis_json) {
+          const analysis = j.analysis.analysis_json;
+          console.log('[Prepublish] Analysis JSON:', analysis);
+          
+          // Transform moments data for RetentionChart
+          const rawMoments = analysis.moments || analysis.highlight_moments || [];
+          console.log('[Prepublish] Raw moments:', rawMoments);
+          const highlightMoments = rawMoments.map((m: any) => ({
+            time: m.time,
+            caption: m.caption || m.label || m.title,
+            title: m.title || m.caption || m.label
+          }));
+          
+          // Transform flat_spots data for RetentionChart
+          const rawFlats = analysis.flat_spots || [];
+          console.log('[Prepublish] Raw flat spots:', rawFlats);
+          const flatSpots = rawFlats.map((f: any) => {
+            const start = f.start_sec ?? f.start ?? f.begin ?? f.time;
+            const end = f.end_sec ?? f.end ?? f.finish;
+            return {
+              time: String(start),
+              duration: end ? `${end - start}s` : undefined,
+              issue: f.reason || f.issue
+            };
+          });
+          
+          console.log('[Prepublish] Transformed data:', { highlightMoments, flatSpots });
+          setPrepublishData({
+            highlightMoments,
+            flatSpots
+          });
+        } else {
+          console.log('[Prepublish] No analysis_json found');
+          setPrepublishData(null);
+        }
+      } else {
+        console.log('[Prepublish] API returned non-OK status:', res.status);
+        setPrepublishData(null);
+      }
+    } catch (error) {
+      console.error('[Prepublish] Error fetching prepublish data:', error);
+      setPrepublishData(null);
     }
   };
 
@@ -199,11 +298,14 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
               const next = e.target.value || null; 
               setSelectedVideoId(next); 
               fetchKpis(next);
+              fetchRetention(next);
               if (next) {
                 fetchBucketInfo(next);
+                fetchPrepublish(next);
               } else {
                 // Reset to original bucket info when selecting "Latest"
                 setBucketInfo(originalBucketInfo);
+                setPrepublishData(null);
               }
             }}
           >
@@ -367,13 +469,52 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
                     🕒 Your video just needs more time to process - this is normal!
                   </div>
                 ) : (
-                  <div className="text-red-600 text-xs mt-2">
-                    💡 This may be due to:
-                    <ul className="list-disc list-inside mt-1">
-                      <li>Missing YouTube Analytics permissions (try reconnecting your account)</li>
-                      <li>API rate limits or temporary issues</li>
-                      <li>Video privacy settings</li>
-                    </ul>
+                  <div className="text-red-600 text-xs mt-2 space-y-2">
+                    <div>
+                      💡 This may be due to:
+                      <ul className="list-disc list-inside mt-1">
+                        <li>Missing YouTube Analytics permissions (try reconnecting your account)</li>
+                        <li>API rate limits or temporary issues</li>
+                        <li>Video privacy settings</li>
+                      </ul>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        // Clear invalid tokens first
+                        try {
+                          await fetch('/api/clear-youtube-tokens', { method: 'POST' });
+                        } catch (e) {
+                          console.error('Failed to clear tokens:', e);
+                        }
+                        
+                        // Then open reconnect popup
+                        const width = 600;
+                        const height = 700;
+                        const left = window.screen.width / 2 - width / 2;
+                        const top = window.screen.height / 2 - height / 2;
+                        const popup = window.open(
+                          '/youtube-connect',
+                          'youtube-connect',
+                          `width=${width},height=${height},left=${left},top=${top}`
+                        );
+                        
+                        // Listen for successful reconnection
+                        const handleMessage = (event: MessageEvent) => {
+                          if (event.data.type === 'youtube-connected') {
+                            window.removeEventListener('message', handleMessage);
+                            // Reload the page to get fresh data
+                            window.location.reload();
+                          }
+                        };
+                        window.addEventListener('message', handleMessage);
+                      }}
+                      className="inline-block px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-colors"
+                    >
+                      🔗 Reconnect YouTube Analytics
+                    </button>
+                    <p className="text-xs text-gray-600 mt-2">
+                      This will clear old tokens and request fresh YouTube Analytics permissions.
+                    </p>
                   </div>
                 )}
               </div>
@@ -421,6 +562,36 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Retention Chart */}
+          <div className="mt-8 bg-white border border-white/20 rounded-lg p-4">
+            <h3 className="text-black font-medium mb-4">Audience Retention</h3>
+            {retentionLoading ? (
+              <div className="flex items-center justify-center h-80">
+                <div className="text-black/70 text-sm">Loading retention data...</div>
+              </div>
+            ) : retentionData ? (
+              <RetentionChart 
+                retention={retentionData.retention} 
+                durationSec={retentionData.durationSec}
+                insights={retentionData.insights}
+                highlightMoments={prepublishData?.highlightMoments}
+                flatSpots={prepublishData?.flatSpots}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-80 bg-gray-50 rounded-lg">
+                <div className="text-center">
+                  <svg className="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  <p className="text-black/70 font-medium">Retention data not yet available</p>
+                  <p className="text-black/50 text-sm mt-2">
+                    YouTube Analytics typically provides retention data 24-48 hours after a video is published.
+                  </p>
                 </div>
               </div>
             )}
