@@ -7,14 +7,20 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 async function uploadToGeminiFromS3(params: { body: any; mime: string; sizeBytes?: number; fileName?: string; }): Promise<{ name: string; uri: string; }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("Missing GEMINI_API_KEY");
-  const uploadUrl = `https://generativelanguage.googleapis.com/v1beta/files:upload?key=${encodeURIComponent(apiKey)}`;
+  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}&uploadType=media`;
   const headers: Record<string, string> = {
     "Content-Type": params.mime,
     "X-Goog-Upload-Protocol": "raw",
   };
   if (params.sizeBytes != null) headers["X-Goog-Upload-Header-Content-Length"] = String(params.sizeBytes);
   if (params.fileName) headers["X-Goog-Upload-File-Name"] = params.fileName;
-  const res = await fetch(uploadUrl, { method: "POST", headers, body: params.body as any });
+  const res = await fetch(uploadUrl, { 
+    method: "POST", 
+    headers, 
+    body: params.body as any,
+    // @ts-ignore - duplex is required for streaming uploads in Node.js fetch
+    duplex: 'half'
+  });
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Gemini upload error: ${res.status} ${txt}`);
@@ -23,14 +29,44 @@ async function uploadToGeminiFromS3(params: { body: any; mime: string; sizeBytes
   const name = j?.file?.name || j?.name || "";
   const uri = j?.file?.uri || j?.uri || "";
   if (!name || !uri) throw new Error("Invalid upload response from Gemini");
-  // Poll until ACTIVE
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, i < 3 ? 500 : 1500));
-    const s = await fetch(`https://generativelanguage.googleapis.com/v1beta/${encodeURIComponent(name)}?key=${encodeURIComponent(apiKey)}`);
+  
+  console.log(`[Prepublish] Gemini file uploaded: ${name}, polling for ACTIVE state...`);
+  
+  // Poll until ACTIVE - large videos can take several minutes
+  let isActive = false;
+  let lastState = "";
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, i < 5 ? 1000 : 3000));
+    const pollUrl = new URL(`https://generativelanguage.googleapis.com/v1beta/${name}`);
+    pollUrl.searchParams.set("key", apiKey);
+    const s = await fetch(pollUrl.toString(), { cache: 'no-store' });
+    if (!s.ok) {
+      console.log(`[Prepublish] Poll ${i}: HTTP ${s.status}`);
+      continue;
+    }
     const sj = await s.json().catch(() => ({}));
     const state = sj?.file?.state || sj?.state || "";
-    if (state === "ACTIVE") break;
-    if (state && ["FAILED", "DELETING"].includes(state)) throw new Error(`Gemini file state ${state}`);
+    if (state !== lastState) {
+      console.log(`[Prepublish] Poll ${i}: state changed to ${state}`);
+      lastState = state;
+    }
+    if (state === "ACTIVE") {
+      isActive = true;
+      console.log(`[Prepublish] File ${name} is ACTIVE after ${i} polls`);
+      break;
+    }
+    if (state === "PROCESSING") {
+      // Still processing, continue polling
+      continue;
+    }
+    if (state && ["FAILED", "DELETING"].includes(state)) {
+      throw new Error(`Gemini file state ${state}`);
+    }
+  }
+  
+  if (!isActive) {
+    console.error(`[Prepublish] File ${name} never reached ACTIVE state. Last state: ${lastState}`);
+    throw new Error(`Gemini file did not reach ACTIVE state after upload (last state: ${lastState || 'unknown'})`);
   }
   return { name, uri };
 }
@@ -88,9 +124,9 @@ async function callGeminiAnalyze({ fileUri, mime }: { fileUri: string; mime: str
 Return compact JSON only (no prose) with:
 - scores (0-10): hook_strength, pacing, energy, visual_engagement
 - metrics: words_per_minute, cuts_per_minute, average_shot_length_sec, slow_start_sec, pause_segments[]
-- flat_spots[]: timestamp ranges likely to lose viewers with a short reason
-- moments[]: 3-7 highlight moments with suggested lower-third captions
-- transcript[]: coarse transcript segments with start/end seconds
+- flat_spots[]: timestamp ranges likely to lose viewers with a short reason. IMPORTANT: start and end must be in TOTAL SECONDS from video start (e.g., 65 for 1:05, 245 for 4:05), NOT minutes or mm:ss format.
+- moments[]: 3-7 highlight moments with suggested lower-third captions. IMPORTANT: time must be in TOTAL SECONDS from video start.
+- transcript[]: coarse transcript segments. IMPORTANT: start and end must be in TOTAL SECONDS from video start.
 - summary: one-paragraph summary of the main improvement areas.
 `;
 
@@ -134,9 +170,10 @@ Return compact JSON only (no prose) with:
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { channelId, planId, key, mime, sizeBytes } = body as {
+    const { channelId, planId, videoId, key, mime, sizeBytes } = body as {
       channelId?: string;
       planId?: string;
+      videoId?: string;
       key?: string;
       mime?: string;
       sizeBytes?: number;
@@ -158,14 +195,19 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (!ch) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
 
-    // Determine version per plan
+    // Determine version per plan or video
     let version = 1;
     try {
-      const { data: rows } = await supabase
+      let query = supabase
         .from("prepublish_videos")
         .select("version")
         .eq("user_id", user.id)
-        .eq("channel_id", ch.id)
+        .eq("channel_id", ch.id);
+      
+      if (planId) query = query.eq("plan_id", planId);
+      else if (videoId) query = query.eq("video_id", videoId);
+      
+      const { data: rows } = await query
         .order("uploaded_at", { ascending: false })
         .limit(1);
       if (rows && rows[0]?.version) version = Number(rows[0].version) + 1;
@@ -178,6 +220,7 @@ export async function POST(request: Request) {
         user_id: user.id,
         channel_id: ch.id,
         plan_id: planId || null,
+        video_id: videoId || null,
         version,
         mime,
         size_bytes: sizeBytes ?? null,
@@ -196,6 +239,7 @@ export async function POST(request: Request) {
     (async () => {
       const s3 = getS3Client();
       const Bucket = getBucketName();
+      const apiKey = process.env.GEMINI_API_KEY;
       try {
         const getCmd = new GetObjectCommand({ Bucket, Key: key });
         const obj = await s3.send(getCmd);
@@ -214,9 +258,13 @@ export async function POST(request: Request) {
           .update({ status: "ready", analyzed_at: new Date().toISOString() })
           .eq("id", preId);
         // Best-effort cleanup of remote Gemini file to reduce footprint
-        try {
-          await fetch(`https://generativelanguage.googleapis.com/v1beta/${encodeURIComponent(uploaded.name)}?key=${encodeURIComponent(apiKey)}`, { method: 'DELETE' });
-        } catch {}
+        if (apiKey) {
+          try {
+            const deleteUrl = new URL(`https://generativelanguage.googleapis.com/v1beta/${uploaded.name}`);
+            deleteUrl.searchParams.set("key", apiKey);
+            await fetch(deleteUrl.toString(), { method: 'DELETE' });
+          } catch {}
+        }
       } catch (err: any) {
         await admin
           .from("prepublish_videos")

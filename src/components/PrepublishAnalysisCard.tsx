@@ -9,10 +9,21 @@ type PrepublishData = {
   analysis_json?: Record<string, any> | null;
 };
 
-export default function PrepublishAnalysisCard({ planId }: { planId: string }) {
+export default function PrepublishAnalysisCard({ 
+  planId, 
+  videoId,
+  channelId 
+}: { 
+  planId?: string;
+  videoId?: string;
+  channelId?: string;
+}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PrepublishData | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -21,7 +32,11 @@ export default function PrepublishAnalysisCard({ planId }: { planId: string }) {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/videos/prepublish?planId=${encodeURIComponent(planId)}`, { cache: "no-store" });
+        const params = new URLSearchParams();
+        if (planId) params.set('planId', planId);
+        if (videoId) params.set('videoId', videoId);
+        
+        const res = await fetch(`/api/videos/prepublish?${params.toString()}`, { cache: "no-store" });
         if (!res.ok) {
           const text = await res.text();
           throw new Error(text || `Request failed with status ${res.status}`);
@@ -46,11 +61,17 @@ export default function PrepublishAnalysisCard({ planId }: { planId: string }) {
       }
     }
 
-    load();
+    if (planId || videoId) {
+      load();
+    } else {
+      setLoading(false);
+      setData(null);
+    }
+    
     return () => {
       cancelled = true;
     };
-  }, [planId]);
+  }, [planId, videoId]);
 
   if (loading) {
     return (
@@ -70,11 +91,133 @@ export default function PrepublishAnalysisCard({ planId }: { planId: string }) {
     );
   }
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !channelId) return;
+
+    setUploading(true);
+    setUploadError(null);
+    setUploadProgress(0);
+
+    try {
+      // 1. Init upload
+      const initRes = await fetch('/api/videos/prepublish/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId, fileName: file.name, contentType: file.type }),
+      });
+      if (!initRes.ok) throw new Error('Failed to init upload');
+      const { uploadUrl, key } = await initRes.json();
+
+      // 2. Upload to S3
+      const xhr = new XMLHttpRequest();
+      xhr.upload.addEventListener('progress', (ev) => {
+        if (ev.lengthComputable) {
+          setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+        }
+      });
+
+      await new Promise((resolve, reject) => {
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve(null);
+          else reject(new Error(`S3 upload failed: ${xhr.status}`));
+        });
+        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.send(file);
+      });
+
+      // 3. Commit and analyze
+      const commitRes = await fetch('/api/videos/prepublish/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelId,
+          videoId,
+          key,
+          mime: file.type,
+          sizeBytes: file.size,
+        }),
+      });
+      if (!commitRes.ok) throw new Error('Failed to commit upload');
+
+      // 4. Start polling
+      setData({ status: 'analyzing', analyzed_at: null, summary: null, analysis_json: null });
+      pollStatus();
+    } catch (err: any) {
+      setUploadError(err?.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pollStatus = () => {
+    const interval = setInterval(async () => {
+      try {
+        const params = new URLSearchParams();
+        if (videoId) params.set('videoId', videoId);
+        
+        const res = await fetch(`/api/videos/prepublish?${params.toString()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.video && (json.video.status === 'ready' || json.video.status === 'error')) {
+          setData({
+            status: json.video.status,
+            analyzed_at: json.video.analyzed_at,
+            summary: json.analysis?.summary ?? json.video.error ?? null,
+            analysis_json: json.analysis?.analysis_json ?? null,
+          });
+          clearInterval(interval);
+        }
+      } catch (err) {
+        console.error('Poll error:', err);
+      }
+    }, 3000);
+  };
+
   if (!data) {
     return (
       <div className="border rounded-lg bg-white p-4 shadow-sm">
-        <h4 className="text-sm font-semibold text-gray-700">Pre-publish analysis</h4>
-        <p className="text-sm text-gray-500 mt-2">No analysis yet. Upload a rough cut from the planner page to run Gemini.</p>
+        <h4 className="text-sm font-semibold text-gray-700">AI Video Analysis</h4>
+        <p className="text-sm text-gray-600 mt-2">
+          Upload your rough cut video to get AI-powered insights on hook strength, pacing, energy, and more.
+        </p>
+        
+        {uploadError && (
+          <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
+            {uploadError}
+          </div>
+        )}
+
+        {uploading ? (
+          <div className="mt-4">
+            <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
+              <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              <span>Uploading... {uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+          <label className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <span>Upload Video</span>
+            <input 
+              type="file" 
+              accept="video/*" 
+              className="hidden" 
+              onChange={handleFileUpload}
+              disabled={!channelId}
+            />
+          </label>
+        )}
       </div>
     );
   }

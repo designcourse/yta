@@ -26,7 +26,13 @@ async function uploadToGemini({ body, mime, sizeBytes, fileName }: { body: Buffe
   if (sizeBytes != null) headers["X-Goog-Upload-Header-Content-Length"] = String(sizeBytes);
   if (fileName) headers["X-Goog-Upload-File-Name"] = fileName;
 
-  const res = await fetch(uploadUrl, { method: "POST", headers, body });
+  const res = await fetch(uploadUrl, { 
+    method: "POST", 
+    headers, 
+    body,
+    // @ts-ignore - duplex is required for streaming uploads in Node.js fetch
+    duplex: 'half'
+  });
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Gemini upload error: ${res.status} ${txt}`);
@@ -62,9 +68,20 @@ async function uploadToGemini({ body, mime, sizeBytes, fileName }: { body: Buffe
 async function analyzeWithGemini({ fileUri, mime }: { fileUri: string; mime: string; }) {
   const apiKey = process.env.GEMINI_API_KEY!;
   const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent";
+  
+  const instruction = `Analyze this YouTube-style video for pre-publish coaching.
+Return compact JSON only (no prose) with:
+- scores (0-10): hook_strength, pacing, energy, visual_engagement
+- metrics: words_per_minute, cuts_per_minute, average_shot_length_sec, slow_start_sec, pause_segments[]
+- flat_spots[]: timestamp ranges likely to lose viewers with a short reason. IMPORTANT: start and end must be in TOTAL SECONDS from video start (e.g., 65 for 1:05, 245 for 4:05), NOT minutes or mm:ss format.
+- moments[]: 3-7 highlight moments with suggested lower-third captions. IMPORTANT: time must be in TOTAL SECONDS from video start.
+- transcript[]: coarse transcript segments. IMPORTANT: start and end must be in TOTAL SECONDS from video start.
+- summary: one-paragraph summary of the main improvement areas.
+`;
+  
   const body = {
     contents: [{ role: 'user', parts: [
-      { text: 'Analyze this YouTube-style video and return JSON with scores, metrics, flat_spots[], moments[], transcript[], summary.' },
+      { text: instruction },
       { fileData: { fileUri, mimeType: mime } }
     ]}],
     generationConfig: { response_mime_type: 'application/json', maxOutputTokens: 8192, temperature: 0.4 }
@@ -80,27 +97,31 @@ async function analyzeWithGemini({ fileUri, mime }: { fileUri: string; mime: str
 // POST /api/videos/prepublish/reanalyze { prepublishVideoId }
 export async function POST(request: Request) {
   try {
-    const { prepublishVideoId, planId } = await request.json();
-    if (!prepublishVideoId && !planId) return NextResponse.json({ error: 'prepublishVideoId or planId required' }, { status: 400 });
+    const { prepublishVideoId, planId, videoId } = await request.json();
+    if (!prepublishVideoId && !planId && !videoId) return NextResponse.json({ error: 'prepublishVideoId, planId, or videoId required' }, { status: 400 });
 
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
 
-    // Resolve target prepublish row by id or latest for plan
+    // Resolve target prepublish row by id or latest for plan/video
     let targetId = prepublishVideoId as string | undefined;
-    if (!targetId && planId) {
-      const { data: latest } = await supabase
+    if (!targetId && (planId || videoId)) {
+      let query = supabase
         .from('prepublish_videos')
         .select('id')
-        .eq('plan_id', planId)
-        .eq('user_id', user.id)  // Add user_id filter for RLS
+        .eq('user_id', user.id);
+      
+      if (planId) query = query.eq('plan_id', planId);
+      else if (videoId) query = query.eq('video_id', videoId);
+      
+      const { data: latest } = await query
         .order('uploaded_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       targetId = latest?.id;
     }
-    if (!targetId) return NextResponse.json({ error: 'No prior upload found for this plan' }, { status: 404 });
+    if (!targetId) return NextResponse.json({ error: 'No prior upload found' }, { status: 404 });
     const { data: row } = await supabase
       .from('prepublish_videos')
       .select('id, s3_key, mime')

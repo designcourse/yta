@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/utils/supabase/server";
 import { createSupabaseAdminClient } from "@/utils/supabase/admin";
-// Avoid heavy LLM imports for plan creation path; fallback summary used
-// Defer loading context helpers to runtime to avoid heavy chunking
+import { getClient } from "@/utils/openai";
+import { getPrompt } from "@/utils/prompts";
 
 async function loadChannelContext(supabase: any, userId: string, externalChannelId: string) {
   const { data: channelMeta, error: chErr } = await supabase
@@ -19,15 +19,62 @@ async function loadChannelContext(supabase: any, userId: string, externalChannel
     .eq("channel_id", channelMeta.id);
 
   const aboutText = (ctxRows || []).find((r: any) => r.prompt_type === "channel_about")?.prompt_text || "";
+  
+  let recentTitles: string[] = [];
+  try {
+    const raw = (ctxRows || []).find((r: any) => r.prompt_type === "recent_video_titles")?.prompt_text;
+    if (raw) recentTitles = JSON.parse(raw);
+  } catch {}
 
-  return { channelMeta, aboutText };
+  return { channelMeta, aboutText, recentTitles };
+}
+
+async function generateVideoSummary(videoTitle: string, context: { channelMeta: any; aboutText: string; recentTitles: string[] }): Promise<string> {
+  try {
+    const client = getClient("openai");
+    const systemPrompt = await getPrompt('video_plan_summary');
+    
+    const userPrompt = `Generate a compelling 2-3 sentence summary for this video idea:
+
+Title: "${videoTitle}"
+Channel: ${context.channelMeta.title}
+About: ${context.aboutText || 'Not provided'}
+Recent Videos: ${context.recentTitles.slice(0, 5).join(', ') || 'None available'}
+
+Create a summary that:
+1. Explains what the video will cover in an engaging way
+2. Highlights the value viewers will get
+3. Fits the channel's style and audience
+4. Is 2-3 sentences maximum
+
+Return ONLY the summary text, no additional formatting or quotation marks.`;
+
+    const completion = await client.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      max_tokens: 200,
+      temperature: 0.7,
+    });
+
+    const summary = completion.choices?.[0]?.message?.content?.trim() || '';
+    return summary || `Draft plan for "${videoTitle}". You can refine this later.`;
+  } catch (error) {
+    console.error('[VideoPlans] Error generating summary:', error);
+    return `Draft plan for "${videoTitle}". You can refine this later.`;
+  }
 }
 
 export async function POST(request: Request) {
   try {
-    const { channelId, ideaId } = await request.json();
-    if (!channelId || !ideaId) {
-      return NextResponse.json({ error: "channelId and ideaId are required" }, { status: 400 });
+    const { channelId, ideaId, customTitle } = await request.json();
+    if (!channelId) {
+      return NextResponse.json({ error: "channelId is required" }, { status: 400 });
+    }
+    if (!ideaId && !customTitle) {
+      return NextResponse.json({ error: "Either ideaId or customTitle is required" }, { status: 400 });
     }
 
     const supabase = await createSupabaseServerClient();
@@ -38,22 +85,35 @@ export async function POST(request: Request) {
     if (!ctx) return NextResponse.json({ error: "Channel not found" }, { status: 404 });
 
     const admin = createSupabaseAdminClient();
-    const { data: ideaRow, error: ideaErr } = await admin
-      .from("video_planner_ideas")
-      .select("id, title")
-      .eq("id", ideaId)
-      .eq("channel_id", ctx.channelMeta.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (ideaErr || !ideaRow) return NextResponse.json({ error: "Idea not found" }, { status: 404 });
+    
+    let videoTitle: string;
+    let videoIdeaId: string | null = null;
+    
+    if (customTitle) {
+      // Custom video title provided
+      videoTitle = customTitle;
+    } else {
+      // Fetch from video_planner_ideas
+      const { data: ideaRow, error: ideaErr } = await admin
+        .from("video_planner_ideas")
+        .select("id, title")
+        .eq("id", ideaId)
+        .eq("channel_id", ctx.channelMeta.id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (ideaErr || !ideaRow) return NextResponse.json({ error: "Idea not found" }, { status: 404 });
+      videoTitle = ideaRow.title;
+      videoIdeaId = ideaRow.id;
+    }
 
-    const summary = `Draft plan for "${ideaRow.title}". You can refine this later.`;
+    // Generate AI summary for the video plan
+    const summary = await generateVideoSummary(videoTitle, ctx);
 
     const insertPayload = {
       user_id: user.id,
       channel_id: ctx.channelMeta.id,
-      idea_id: ideaRow.id,
-      title: ideaRow.title,
+      idea_id: videoIdeaId,
+      title: videoTitle,
       summary,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -161,6 +221,41 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Fetch video plan error:", error);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { id } = await request.json();
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+
+    // Verify ownership before deleting
+    const { data: plan } = await supabase
+      .from('video_plans')
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    
+    if (!plan) return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+
+    // Delete the plan (cascading deletes will handle related records like scripts)
+    const { error } = await supabase
+      .from('video_plans')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id);
+
+    if (error) return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
+
+    return NextResponse.json({ success: true });
+  } catch (e) {
+    console.error('Delete video plan error:', e);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
 

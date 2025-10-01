@@ -4,6 +4,7 @@ import RefreshContainer from "@/components/RefreshContainer";
 import LastVideoContainer from "@/components/LastVideoContainer";
 import EarlyMetricsCard from "@/components/EarlyMetricsCard";
 import EarlyMetricsProgress from "@/components/EarlyMetricsProgress";
+import PrepublishAnalysisCard from "@/components/PrepublishAnalysisCard";
 import { useEffect, useState } from "react";
 
 interface VideoData {
@@ -423,6 +424,14 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Pre-Publish Video Analysis */}
+          <div className="mt-8">
+            <PrepublishAnalysisCard 
+              channelId={channelId}
+              videoId={selectedVideoId || videoData.video_id}
+            />
           </div>
 
           {/* Early Rescue Prompt (proxy using views/hour vs baseline P25) */}

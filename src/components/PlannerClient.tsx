@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import RefreshContainer from "@/components/RefreshContainer";
+import CustomVideoModal from "@/components/CustomVideoModal";
 
 interface VideoIdeaData {
   id: string;
@@ -40,6 +41,8 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
   const [uploadingPlanId, setUploadingPlanId] = useState<string | null>(null);
   const [uploadPct, setUploadPct] = useState<Record<string, number>>({});
   const [prepublishStatus, setPrepublishStatus] = useState<Record<string, { id?: string; status?: string; summary?: string }>>({});
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [creatingCustom, setCreatingCustom] = useState(false);
 
   async function uploadWithProgress(url: string, file: File, contentType: string, onProgress: (pct: number) => void) {
     await new Promise<void>((resolve, reject) => {
@@ -290,6 +293,29 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
     }
   };
 
+  const handleCreateCustomVideo = async (customTitle: string) => {
+    if (!channelId || !customTitle.trim()) return;
+    try {
+      setCreatingCustom(true);
+      const res = await fetch('/api/video-plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId, customTitle: customTitle.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to create custom video plan');
+      }
+      const { planId } = await res.json();
+      setShowCustomModal(false);
+      // Navigate to the new page
+      router.push(`/dashboard/${encodeURIComponent(channelId)}/planner/video/${encodeURIComponent(planId)}`);
+    } catch (e) {
+      setCreatingCustom(false);
+      setError(e instanceof Error ? e.message : 'An error occurred');
+    }
+  };
+
   const getChannelAvatar = () => {
     if (!channelData?.thumbnails) return null;
     const thumbnails = channelData.thumbnails;
@@ -326,13 +352,63 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
 
   return (
     <div className="space-y-15">
-      {savedPlans.length > 0 && (
+      <CustomVideoModal
+        isOpen={showCustomModal}
+        onClose={() => setShowCustomModal(false)}
+        onSave={handleCreateCustomVideo}
+        isCreating={creatingCustom}
+      />
+      {(savedPlans.length > 0 || true) && (
         <div className="relative">
           <div 
             className={`grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-6 transition-opacity duration-500 ${
               fadeOut ? 'opacity-30' : 'opacity-100'
             }`}
           >
+            {/* Custom Video Card - Always First */}
+            <button
+              onClick={() => setShowCustomModal(true)}
+              className="transition-all duration-300 text-left planner-card-hover"
+              style={{ minWidth: '300px' }}
+            >
+              <div className="bg-white rounded-lg overflow-hidden border-2 border-dashed border-gray-300 hover:border-blue-500">
+                <div className="w-full h-[221px] flex flex-col items-center justify-center relative" style={{ backgroundColor: '#F3F4F6' }}>
+                  <svg className="w-16 h-16 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span className="text-gray-600 font-medium">Add Custom Video</span>
+                </div>
+
+                <div className="p-4 flex items gap-4">
+                  <div className="w-8 h-8 rounded-full bg-gray-300 flex-shrink-0 overflow-hidden">
+                    {getChannelAvatar() && !avatarFailed ? (
+                      <img 
+                        src={getChannelAvatar()!}
+                        alt={`${channelData?.title} avatar`}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
+                        onError={() => setAvatarFailed(true)}
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-300 flex items-center justify-center">
+                        <span className="text-white font-medium text-sm">
+                          {channelData?.title?.charAt(0) || '?'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-base font-bold text-gray-900 mb-1 leading-tight min-h-[2.5rem] flex items-start">
+                      <span className="line-clamp-2">Custom Video</span>
+                    </h3>
+                    <p className="text-base text-gray-600">{channelData?.title || 'DesignCourse'}</p>
+                  </div>
+                </div>
+              </div>
+            </button>
+
             {savedPlans.map((plan) => (
               <div
                 key={plan.id}
@@ -609,6 +685,7 @@ export default function PlannerClient({ channelId }: { channelId: string }) {
 
 function PlanMenu({ planId, title, channelId, isNext, onMarked }: { planId: string; title: string; channelId: string; isNext: boolean; onMarked: () => void }) {
   const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   
   useEffect(() => {
     const handleClickOutside = () => setOpen(false);
@@ -617,6 +694,25 @@ function PlanMenu({ planId, title, channelId, isNext, onMarked }: { planId: stri
       return () => document.removeEventListener('click', handleClickOutside);
     }
   }, [open]);
+  
+  const handleDelete = async () => {
+    if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
+    
+    try {
+      setDeleting(true);
+      const res = await fetch('/api/video-plans', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: planId }),
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      setOpen(false);
+      onMarked(); // Refresh the list
+    } catch (err) {
+      alert('Failed to delete video plan');
+      setDeleting(false);
+    }
+  };
   
   return (
     <div className="relative">
@@ -668,6 +764,13 @@ function PlanMenu({ planId, title, channelId, isNext, onMarked }: { planId: stri
           {isNext && (
             <div className="px-3 py-2 text-xs text-green-700">This is marked as next</div>
           )}
+          <button
+            className="w-full text-left px-3 py-2 hover:bg-gray-50 text-red-600 disabled:opacity-50"
+            onClick={handleDelete}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete idea'}
+          </button>
         </div>
       )}
     </div>
