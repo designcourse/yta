@@ -1,6 +1,15 @@
 "use client";
 
+import { useEffect, useRef, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
+
+// YouTube IFrame Player API types
+declare global {
+  interface Window {
+    YT: any;
+    onYouTubeIframeAPIReady: () => void;
+  }
+}
 
 interface RetentionDataPoint {
   time: number;
@@ -33,6 +42,7 @@ interface RetentionChartProps {
   insights?: Insight[];
   highlightMoments?: HighlightMoment[];
   flatSpots?: FlatSpot[];
+  videoId?: string;
 }
 
 function formatTime(seconds: number): string {
@@ -66,8 +76,94 @@ export default function RetentionChart({
   durationSec, 
   insights = [], 
   highlightMoments = [], 
-  flatSpots = [] 
+  flatSpots = [],
+  videoId
 }: RetentionChartProps) {
+  const playerRef = useRef<any>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [apiLoaded, setApiLoaded] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const animationFrameRef = useRef<number | null>(null);
+
+  // Load YouTube IFrame API
+  useEffect(() => {
+    if (window.YT && window.YT.Player) {
+      setApiLoaded(true);
+      return;
+    }
+
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.async = true;
+    const firstScriptTag = document.getElementsByTagName('script')[0];
+    firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+
+    window.onYouTubeIframeAPIReady = () => {
+      setApiLoaded(true);
+    };
+  }, []);
+
+  // Initialize player when API is loaded and videoId is available
+  useEffect(() => {
+    if (!apiLoaded || !videoId || !playerContainerRef.current) return;
+
+    playerRef.current = new window.YT.Player(playerContainerRef.current, {
+      videoId: videoId,
+      width: '100%',
+      height: '100%',
+      playerVars: {
+        rel: 0,
+        modestbranding: 1,
+      },
+      events: {
+        onReady: () => {
+          setPlayerReady(true);
+        },
+      },
+    });
+
+    return () => {
+      if (playerRef.current) {
+        playerRef.current.destroy();
+      }
+    };
+  }, [apiLoaded, videoId]);
+
+  // Update current time with requestAnimationFrame for smooth playback tracking
+  useEffect(() => {
+    if (!playerReady || !playerRef.current) return;
+
+    const updateTime = () => {
+      if (playerRef.current && playerRef.current.getCurrentTime) {
+        const time = playerRef.current.getCurrentTime();
+        setCurrentTime(time);
+      }
+      animationFrameRef.current = requestAnimationFrame(updateTime);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(updateTime);
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [playerReady]);
+
+  const handleChartClick = (e: any) => {
+    if (!playerReady || !playerRef.current || !e || !e.activeLabel) return;
+    
+    // e.activeLabel contains the time value from the chart
+    const clickedTime = typeof e.activeLabel === 'number' ? e.activeLabel : parseFloat(e.activeLabel);
+    
+    if (!isNaN(clickedTime) && playerRef.current.seekTo) {
+      playerRef.current.seekTo(clickedTime, true);
+      // Optional: pause the video so user can see the exact frame
+      // playerRef.current.pauseVideo();
+    }
+  };
+
   console.log('[RetentionChart] Render with:', {
     retentionPoints: retention.length,
     durationSec,
@@ -75,10 +171,12 @@ export default function RetentionChart({
     highlightMomentsCount: highlightMoments?.length || 0,
     flatSpotsCount: flatSpots?.length || 0,
     highlightMoments,
-    flatSpots
+    flatSpots,
+    videoId,
+    playerReady
   });
   // Convert retention data to chart format
-  const data: RetentionDataPoint[] = retention.map(([ratioStr, audienceWatchRatio]) => {
+  const dataPoints: RetentionDataPoint[] = retention.map(([ratioStr, audienceWatchRatio]) => {
     // Ensure ratioStr is a string and handle both "25%" format and numeric 0.25 format
     const ratioValue = typeof ratioStr === 'string' 
       ? parseFloat(ratioStr.replace('%', '')) / 100
@@ -92,6 +190,16 @@ export default function RetentionChart({
       retention: audienceWatchRatio * 100, // Convert to percentage
     };
   });
+
+  // Add starting point at 0:00 with 100% retention (every video starts at 100%)
+  const data: RetentionDataPoint[] = [
+    {
+      time: 0,
+      timeLabel: '0:00',
+      retention: 100,
+    },
+    ...dataPoints
+  ];
 
   // Process point markers (insights and highlights)
   const rawMarkers = [
@@ -199,12 +307,22 @@ export default function RetentionChart({
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-4">
+      {/* YouTube Video Player */}
+      {videoId && (
+        <div className="w-full bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+          <div ref={playerContainerRef} className="w-full h-full" />
+        </div>
+      )}
+      
+      {/* Retention Graph */}
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
             data={data}
             margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+            onClick={handleChartClick}
+            style={{ cursor: videoId && playerReady ? 'pointer' : 'default' }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
             <XAxis
@@ -215,6 +333,7 @@ export default function RetentionChart({
               label={{ value: 'Video Time', position: 'insideBottom', offset: -5 }}
               tick={{ fontSize: 12 }}
               stroke="#6b7280"
+              tickCount={20}
             />
             <YAxis
               label={{ value: 'Retention %', angle: -90, position: 'insideLeft' }}
@@ -258,6 +377,27 @@ export default function RetentionChart({
                 }}
               />
             ))}
+
+            {/* Real-time playback scrubber */}
+            {videoId && playerReady && currentTime > 0 && (
+              <>
+                {/* Outer blue line */}
+                <ReferenceLine
+                  x={currentTime}
+                  stroke="#3b82f6"
+                  strokeWidth={12}
+                  strokeOpacity={0.8}
+                  isFront={true}
+                />
+                {/* Inner white line */}
+                <ReferenceLine
+                  x={currentTime}
+                  stroke="#ffffff"
+                  strokeWidth={2}
+                  isFront={true}
+                />
+              </>
+            )}
 
             <Line
               type="monotone"

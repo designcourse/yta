@@ -242,14 +242,26 @@ export async function POST(request: Request) {
       const Bucket = getBucketName();
       const apiKey = process.env.GEMINI_API_KEY;
       try {
+        console.log(`[Prepublish:commit] Starting background analysis for ${preId}, S3 key: ${key}`);
+        
+        console.log(`[Prepublish:commit] Fetching from S3...`);
         const getCmd = new GetObjectCommand({ Bucket, Key: key });
         const obj = await s3.send(getCmd);
+        console.log(`[Prepublish:commit] S3 fetch successful, content length: ${obj.ContentLength || 'unknown'}`);
+        
         // @ts-ignore
         const bodyStream = obj.Body as any;
+        
+        console.log(`[Prepublish:commit] Uploading to Gemini...`);
         const uploaded = await uploadToGeminiFromS3({ body: bodyStream, mime, sizeBytes, fileName: key.split('/').pop() || 'video' });
+        console.log(`[Prepublish:commit] Gemini upload successful: ${uploaded.name}`);
+        
+        console.log(`[Prepublish:commit] Running Gemini analysis...`);
         const analysis = await callGeminiAnalyze({ fileUri: uploaded.uri, mime });
+        console.log(`[Prepublish:commit] Gemini analysis complete`);
 
         // Save analysis
+        console.log(`[Prepublish:commit] Saving analysis to database...`);
         await admin
           .from("prepublish_analyses")
           .insert({ prepublish_video_id: preId, model: "gemini-2.5-pro", summary: analysis?.summary || null, analysis_json: analysis || {}, transcript_json: analysis?.transcript || null });
@@ -258,6 +270,8 @@ export async function POST(request: Request) {
           .from("prepublish_videos")
           .update({ status: "ready", analyzed_at: new Date().toISOString() })
           .eq("id", preId);
+        
+        console.log(`[Prepublish:commit] Analysis saved successfully`);
         
         // Get internal channel ID to invalidate Neria context cache
         const { data: videoData } = await admin
@@ -287,9 +301,15 @@ export async function POST(request: Request) {
           } catch {}
         }
       } catch (err: any) {
+        console.error(`[Prepublish:commit] ERROR during background analysis:`, err);
+        console.error(`[Prepublish:commit] Error name: ${err?.name}`);
+        console.error(`[Prepublish:commit] Error message: ${err?.message}`);
+        console.error(`[Prepublish:commit] Error stack:`, err?.stack);
+        
+        const errorMessage = err?.message || err?.toString() || 'Unknown error';
         await admin
           .from("prepublish_videos")
-          .update({ status: "error", error: String(err?.message || err) })
+          .update({ status: "error", error: errorMessage })
           .eq("id", preId);
       }
     })();

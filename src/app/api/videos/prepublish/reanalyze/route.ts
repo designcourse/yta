@@ -98,12 +98,22 @@ Return compact JSON only (no prose) with:
 // POST /api/videos/prepublish/reanalyze { prepublishVideoId }
 export async function POST(request: Request) {
   try {
-    const { prepublishVideoId, planId, videoId } = await request.json();
-    if (!prepublishVideoId && !planId && !videoId) return NextResponse.json({ error: 'prepublishVideoId, planId, or videoId required' }, { status: 400 });
+    const body = await request.json();
+    console.log('[Prepublish:reanalyze] POST request received with body:', JSON.stringify(body));
+    
+    const { prepublishVideoId, planId, videoId } = body;
+    if (!prepublishVideoId && !planId && !videoId) {
+      console.log('[Prepublish:reanalyze] Missing required parameters');
+      return NextResponse.json({ error: 'prepublishVideoId, planId, or videoId required' }, { status: 400 });
+    }
 
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    if (!user) {
+      console.log('[Prepublish:reanalyze] User not authenticated');
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+    console.log('[Prepublish:reanalyze] User authenticated:', user.id);
 
     // Resolve target prepublish row by id or latest for plan/video
     let targetId = prepublishVideoId as string | undefined;
@@ -139,16 +149,30 @@ export async function POST(request: Request) {
       const s3 = getS3Client();
       const Bucket = getBucketName();
       try {
+        console.log(`[Prepublish:reanalyze] Starting reanalysis for ${targetId}, S3 key: ${row.s3_key}`);
+        
+        console.log(`[Prepublish:reanalyze] Fetching from S3...`);
         const obj = await s3.send(new GetObjectCommand({ Bucket, Key: row.s3_key }));
         if (!obj.Body) throw new Error("S3 object body is empty");
+        console.log(`[Prepublish:reanalyze] S3 fetch successful, content length: ${obj.ContentLength || 'unknown'}`);
         
         // Convert stream to buffer
+        console.log(`[Prepublish:reanalyze] Converting stream to buffer...`);
         const buffer = await readStreamToBuffer(obj.Body);
+        console.log(`[Prepublish:reanalyze] Buffer created, size: ${buffer.length} bytes`);
         
+        console.log(`[Prepublish:reanalyze] Uploading to Gemini...`);
         const uploaded = await uploadToGemini({ body: buffer, mime: row.mime, sizeBytes: buffer.length, fileName: row.s3_key.split('/').pop() || 'video' });
+        console.log(`[Prepublish:reanalyze] Gemini upload successful: ${uploaded.name}`);
+        
+        console.log(`[Prepublish:reanalyze] Running Gemini analysis...`);
         const analysis = await analyzeWithGemini({ fileUri: uploaded.uri, mime: row.mime });
+        console.log(`[Prepublish:reanalyze] Gemini analysis complete`);
+        
+        console.log(`[Prepublish:reanalyze] Saving analysis to database...`);
         await admin.from('prepublish_analyses').insert({ prepublish_video_id: targetId, model: 'gemini-2.5-pro', summary: analysis?.summary || null, analysis_json: analysis || {}, transcript_json: analysis?.transcript || null });
         await admin.from('prepublish_videos').update({ status: 'ready', analyzed_at: new Date().toISOString() }).eq('id', targetId);
+        console.log(`[Prepublish:reanalyze] Analysis saved successfully`);
         
         // Invalidate Neria context cache so analysis is available immediately
         const { data: videoData } = await admin
@@ -170,7 +194,13 @@ export async function POST(request: Request) {
           }
         }
       } catch (e: any) {
-        await admin.from('prepublish_videos').update({ status: 'error', error: String(e?.message || e) }).eq('id', targetId);
+        console.error(`[Prepublish:reanalyze] ERROR during reanalysis:`, e);
+        console.error(`[Prepublish:reanalyze] Error name: ${e?.name}`);
+        console.error(`[Prepublish:reanalyze] Error message: ${e?.message}`);
+        console.error(`[Prepublish:reanalyze] Error stack:`, e?.stack);
+        
+        const errorMessage = e?.message || e?.toString() || 'Unknown error';
+        await admin.from('prepublish_videos').update({ status: 'error', error: errorMessage }).eq('id', targetId);
       }
     })();
 

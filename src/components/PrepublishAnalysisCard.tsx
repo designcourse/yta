@@ -96,40 +96,61 @@ export default function PrepublishAnalysisCard({
     const file = e.target.files?.[0];
     if (!file || !channelId) return;
 
+    console.log('[PrepublishAnalysisCard] Starting file upload:', file.name, file.type, file.size);
+    
     setUploading(true);
     setUploadError(null);
     setUploadProgress(0);
+    setError(null);
 
     try {
       // 1. Init upload
+      console.log('[PrepublishAnalysisCard] Step 1: Initializing upload...');
       const initRes = await fetch('/api/videos/prepublish/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channelId, fileName: file.name, contentType: file.type }),
       });
-      if (!initRes.ok) throw new Error('Failed to init upload');
+      if (!initRes.ok) {
+        const errText = await initRes.text();
+        console.error('[PrepublishAnalysisCard] Init failed:', errText);
+        throw new Error('Failed to init upload: ' + errText);
+      }
       const { uploadUrl, key } = await initRes.json();
+      console.log('[PrepublishAnalysisCard] Init successful, key:', key);
 
       // 2. Upload to S3
+      console.log('[PrepublishAnalysisCard] Step 2: Uploading to S3...');
       const xhr = new XMLHttpRequest();
       xhr.upload.addEventListener('progress', (ev) => {
         if (ev.lengthComputable) {
-          setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+          const pct = Math.round((ev.loaded / ev.total) * 100);
+          setUploadProgress(pct);
+          console.log('[PrepublishAnalysisCard] Upload progress:', pct + '%');
         }
       });
 
       await new Promise((resolve, reject) => {
         xhr.addEventListener('load', () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve(null);
-          else reject(new Error(`S3 upload failed: ${xhr.status}`));
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('[PrepublishAnalysisCard] S3 upload successful');
+            resolve(null);
+          } else {
+            console.error('[PrepublishAnalysisCard] S3 upload failed:', xhr.status, xhr.statusText);
+            reject(new Error(`S3 upload failed: ${xhr.status}`));
+          }
         });
-        xhr.addEventListener('error', () => reject(new Error('Network error during upload')));
+        xhr.addEventListener('error', () => {
+          console.error('[PrepublishAnalysisCard] Network error during S3 upload');
+          reject(new Error('Network error during upload'));
+        });
         xhr.open('PUT', uploadUrl);
         xhr.setRequestHeader('Content-Type', file.type);
         xhr.send(file);
       });
 
       // 3. Commit and analyze
+      console.log('[PrepublishAnalysisCard] Step 3: Committing upload...');
       const commitRes = await fetch('/api/videos/prepublish/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,15 +162,23 @@ export default function PrepublishAnalysisCard({
           sizeBytes: file.size,
         }),
       });
-      if (!commitRes.ok) throw new Error('Failed to commit upload');
+      if (!commitRes.ok) {
+        const errText = await commitRes.text();
+        console.error('[PrepublishAnalysisCard] Commit failed:', errText);
+        throw new Error('Failed to commit upload: ' + errText);
+      }
+      console.log('[PrepublishAnalysisCard] Commit successful, starting analysis...');
 
       // 4. Start polling
       setData({ status: 'analyzing', analyzed_at: null, summary: null, analysis_json: null });
       pollStatus();
     } catch (err: any) {
+      console.error('[PrepublishAnalysisCard] Upload error:', err);
       setUploadError(err?.message || 'Upload failed');
     } finally {
       setUploading(false);
+      // Reset file input
+      e.target.value = '';
     }
   };
 
@@ -305,6 +334,27 @@ export default function PrepublishAnalysisCard({
 
   return (
     <div className="border rounded-lg bg-white p-4 shadow-sm space-y-4">
+      {uploadError && (
+        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
+          Upload failed: {uploadError}
+        </div>
+      )}
+      
+      {uploading && (
+        <div className="bg-blue-50 border border-blue-200 rounded p-3">
+          <div className="flex items-center gap-2 text-sm text-blue-700 mb-2">
+            <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+            <span>Uploading new version... {uploadProgress}%</span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2">
+            <div 
+              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+      
       <div className="flex items-start justify-between gap-4">
         <div>
           <h4 className="text-sm font-semibold text-gray-700">Pre-publish analysis</h4>
@@ -314,7 +364,7 @@ export default function PrepublishAnalysisCard({
           {(planId || videoId) && (
             <button
               onClick={handleReanalyze}
-              disabled={reanalyzing}
+              disabled={reanalyzing || uploading}
               className="text-xs font-medium text-blue-600 hover:text-blue-700 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-1"
             >
               {reanalyzing ? (
@@ -332,6 +382,19 @@ export default function PrepublishAnalysisCard({
               )}
             </button>
           )}
+          <label className="text-xs font-medium text-green-600 hover:text-green-700 cursor-pointer flex items-center gap-1">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <span>Upload New</span>
+            <input 
+              type="file" 
+              accept="video/*" 
+              className="hidden" 
+              onChange={handleFileUpload}
+              disabled={!channelId || uploading || reanalyzing}
+            />
+          </label>
           <a
             href={`/api/videos/prepublish?${planId ? `planId=${encodeURIComponent(planId)}` : videoId ? `videoId=${encodeURIComponent(videoId)}` : ''}`}
             target="_blank"

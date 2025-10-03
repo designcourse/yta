@@ -111,6 +111,8 @@ BUCKET RULES:
 - If all videos are very similar content, use only 1 bucket
 - Only create multiple buckets if there are genuinely distinct content themes
 - Prefer fewer, broader buckets over many narrow ones
+- AVOID redundant buckets: If two themes overlap significantly (e.g., "Industry Commentary" vs "Industry Commentary & Reviews"), combine them into ONE bucket with the broader label
+- Each bucket must be clearly distinct from the others
 
 Return valid JSON: {"buckets": [{"key": "snake_case", "label": "Name", "description": "brief"}], "assignments": [{"videoId": "id", "bucketKey": "key", "confidence": 0.0-1.0}]}.
 CRITICAL: Create exactly ${sampledVideos.length} assignments - one for EVERY video. No video can be skipped.`;

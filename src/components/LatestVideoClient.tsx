@@ -581,6 +581,7 @@ export default function LatestVideoClient({ channelId }: { channelId: string }) 
                 insights={retentionData.insights}
                 highlightMoments={prepublishData?.highlightMoments}
                 flatSpots={prepublishData?.flatSpots}
+                videoId={selectedVideoId || videoData.video_id}
               />
             ) : (
               <div className="flex items-center justify-center h-80 bg-gray-50 rounded-lg">
