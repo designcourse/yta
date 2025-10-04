@@ -6,6 +6,7 @@ import { logAi } from "@/utils/logging";
 import { getValidAccessToken } from "@/utils/googleAuth";
 import { getPrompt } from "@/utils/prompts";
 import { buildNeriaContextBundle, formatBundleForSystemPrompt } from "@/utils/neria-context";
+import { formatContextForNeria } from "@/utils/context-formatter";
 
 // Normalize relative time expressions (e.g., "this year") to absolute dates for search queries
 function normalizeRelativeTimeInQuery(text: string): string {
@@ -305,7 +306,9 @@ async function shouldUseRealtimeSearch(message: string): Promise<{ needsSearch: 
         {
           role: 'system',
           content:
-            'You are Neria. Decide if the user query requires real-time web search for very recent data (breaking news, product releases in last few days, current events). Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
+            'You are Neria. Decide if the user query requires real-time web search for very recent data (breaking news, product releases in last few days, current events). ' +
+            'NEVER search for: video performance, analytics, channel stats, or subscriber counts (these are in context already). ' +
+            'Respond ONLY with JSON: {"needsSearch": true|false, "query": "web search query"}.',
         },
         { role: 'user', content: message },
       ],
@@ -1315,14 +1318,47 @@ export async function POST(request: Request) {
 
     // Build enriched analytics context bundle (facts only), with cache
     let bundleText: string | null = null;
+    let forcedSummary: string | null = null;
     try {
       if (pinned.channelId && pinned.channelMeta?.externalId) {
-        const bundle = await buildNeriaContextBundle({
-          request,
-          channelExternalId: pinned.channelMeta.externalId,
-          internalChannelId: pinned.channelId,
+        // Use new context bundle API with intent-aware loading
+        // Note: For now we use 'general' as default. Intent classification happens earlier
+        // in specific flows (video generation, etc.) but not all paths expose it here.
+        const intentParam = 'general';
+        const includeDetail = false; // Start with fast tier, can be enhanced based on message analysis
+        
+        const origin = new URL(request.url).origin;
+        const contextUrl = `${origin}/api/neria/context-bundle?channelId=${encodeURIComponent(pinned.channelMeta.externalId)}&intent=${intentParam}&includeDetail=${includeDetail}`;
+        
+        const contextRes = await fetch(contextUrl, {
+          headers: { cookie: request.headers.get('cookie') || '' },
         });
-        bundleText = await formatBundleForSystemPrompt(bundle);
+        
+        if (contextRes.ok) {
+          const contextBundle = await contextRes.json();
+          bundleText = formatContextForNeria(contextBundle);
+          console.log('[Neria][ContextBundle] Using new context system, tier:', contextBundle.tier);
+          // Extract ready_response block if present
+          if (bundleText) {
+            const markerStart = 'COPY THIS SUMMARY VERBATIM';
+            const markerEnd = '━━━ END COPY ━━━';
+            const sIdx = bundleText.indexOf(markerStart);
+            const eIdx = bundleText.indexOf(markerEnd);
+            if (sIdx !== -1 && eIdx !== -1 && eIdx > sIdx) {
+              const slice = bundleText.slice(sIdx + markerStart.length, eIdx).trim();
+              forcedSummary = slice;
+            }
+          }
+        } else {
+          // Fallback to old system if new one fails
+          console.warn('[Neria][ContextBundle] New system failed, using legacy fallback');
+          const bundle = await buildNeriaContextBundle({
+            request,
+            channelExternalId: pinned.channelMeta.externalId,
+            internalChannelId: pinned.channelId,
+          });
+          bundleText = await formatBundleForSystemPrompt(bundle);
+        }
       }
     } catch (e) {
       console.warn('[Neria][ContextBundle] Failed to build bundle:', e);
@@ -1412,20 +1448,265 @@ export async function POST(request: Request) {
     
 
 
-    // Call GPT-4o with streaming
+    // Try managed-context retrieval via OpenAI Responses API if a vector store exists for this channel
     const client = getClient('openai');
+    let retrievalOutput: string | null = null;
+    try {
+      if (pinned.channelId) {
+        const { data: vsRow } = await supabase
+          .from('neria_context')
+          .select('prompt_text')
+          .eq('channel_id', pinned.channelId)
+          .eq('prompt_type', 'openai_vector_store_id')
+          .maybeSingle();
+
+        if (vsRow?.prompt_text) {
+          const inputText = messages
+            .map(m => `${m.role.toUpperCase()}:\n${m.content}`)
+            .join('\n\n');
+          try {
+            // @ts-ignore using Responses API with attachments
+            const resp = await (client as any).responses.create({
+              model: primaryModel.model,
+              input: inputText,
+              tool_choice: 'auto',
+              attachments: [{ vector_store_id: vsRow.prompt_text }],
+            });
+            // @ts-ignore
+            retrievalOutput = resp?.output_text || null;
+          } catch (e) {
+            console.warn('[Neria][Responses] Retrieval path failed, will fall back to chat.completions', e);
+          }
+        }
+      }
+    } catch {}
+
+    if (retrievalOutput) {
+      const startedAt = Date.now();
+      let assistantContent = retrievalOutput;
+      const encoder = new TextEncoder();
+      const readableStream = new ReadableStream({
+        async start(controller) {
+          try {
+            const initData = { type: 'init', threadId, contextPercentage, model: primaryModel.model, inputTokens, maxTokens };
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(initData)}\n\n`));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', content: assistantContent })}\n\n`));
+
+            await supabase.from('chat_messages').insert({ thread_id: threadId, role: 'assistant', content: assistantContent });
+            try {
+              await logAi(supabase as any, {
+                userId: user.id,
+                channelId: pinned.channelId || null,
+                endpoint: '/api/neria/chat',
+                provider: 'openai',
+                model: primaryModel.model,
+                input: { message: body.message.slice(0, 500), contextPercentage },
+                output: null,
+                outputText: assistantContent,
+                latencyMs: Date.now() - startedAt,
+                ok: true,
+                error: null,
+              });
+            } catch {}
+
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+            controller.close();
+          } catch (error) {
+            console.error('Responses path error:', error);
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Responses failed' })}\n\n`));
+            controller.close();
+          }
+        }
+      });
+
+      return new Response(readableStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // Switch to Gemini 2.5 Pro for chat streaming
     const startedAt = Date.now();
-    const stream = await client.chat.completions.create({
-      model: primaryModel.model,
-      messages,
-      temperature: 0.4,
-      max_tokens: Math.min(800, primaryModel.max_output_tokens),
-      stream: true,
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const geminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent';
+
+    console.log('[Neria][Gemini] Starting Gemini call', { 
+      hasApiKey: !!geminiApiKey, 
+      hasForcedSummary: !!forcedSummary,
+      forcedSummaryLength: forcedSummary?.length || 0
     });
 
-    let assistantContent = "";
+    // If we have a forced summary, put it at the very top as the first assistant line
+    const combined = (
+      forcedSummary
+        ? `ASSISTANT:\n${forcedSummary}\n\n` : ''
+    ) + messages.map(m => `${m.role.toUpperCase()}:\n${m.content}`).join('\n\n');
 
-    // Create a readable stream for the response
+    const encoder = new TextEncoder();
+    let assistantContent = '';
+
+    try {
+      if (!geminiApiKey) {
+        throw new Error('GEMINI_API_KEY not configured');
+      }
+
+      console.log('[Neria][Gemini] Calling Gemini API...');
+      
+      // Define function tools for Gemini
+      const tools = [{
+        function_declarations: [{
+          name: 'get_video_stats',
+          description: 'Get performance statistics for a specific video by title or video ID. Use this when the user asks about a specific video that is not their latest upload.',
+          parameters: {
+            type: 'object',
+            properties: {
+              channelId: {
+                type: 'string',
+                description: 'The YouTube channel ID'
+              },
+              title: {
+                type: 'string',
+                description: 'The title or partial title of the video to search for'
+              },
+              videoId: {
+                type: 'string',
+                description: 'The YouTube video ID (alternative to title)'
+              }
+            },
+            required: ['channelId']
+          }
+        }]
+      }];
+      
+      const geminiRes = await fetch(geminiUrl + `?key=${encodeURIComponent(geminiApiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: combined }] }],
+          tools,
+          generationConfig: { 
+            temperature: 0.4, 
+            maxOutputTokens: 8192
+          },
+        }),
+      });
+      
+      console.log('[Neria][Gemini] Response status:', geminiRes.status);
+      
+      if (!geminiRes.ok) {
+        const errTxt = await geminiRes.text();
+        console.error('[Neria][Gemini] API error:', errTxt);
+        throw new Error(`Gemini request failed: ${geminiRes.status} ${errTxt}`);
+      }
+      
+      const geminiJson: any = await geminiRes.json();
+      console.log('[Neria][Gemini] Got response, checking for function calls...');
+      
+      const candidate = geminiJson?.candidates?.[0];
+      const parts = candidate?.content?.parts || [];
+      
+      // Check if Gemini wants to call a function
+      const functionCall = parts.find((p: any) => p?.functionCall);
+      
+      if (functionCall) {
+        console.log('[Neria][Gemini] Function call requested:', functionCall.functionCall.name);
+        const { name, args } = functionCall.functionCall;
+        
+        if (name === 'get_video_stats' && pinned.channelMeta?.externalId) {
+          // Execute the function call
+          const videoStatsUrl = new URL(`${request.url.split('/api/')[0]}/api/video-stats`);
+          videoStatsUrl.searchParams.set('channelId', pinned.channelMeta.externalId);
+          if (args.title) videoStatsUrl.searchParams.set('title', args.title);
+          if (args.videoId) videoStatsUrl.searchParams.set('videoId', args.videoId);
+          
+          const statsRes = await fetch(videoStatsUrl.toString(), {
+            headers: { Cookie: request.headers.get('cookie') || '' }
+          });
+          
+          let functionResponse: any;
+          if (statsRes.ok) {
+            functionResponse = await statsRes.json();
+            console.log('[Neria][Gemini] Function result:', JSON.stringify(functionResponse, null, 2));
+          } else {
+            functionResponse = { error: 'Video not found or no stats available' };
+          }
+          
+          // Call Gemini again with the function result
+          const geminiRes2 = await fetch(geminiUrl + `?key=${encodeURIComponent(geminiApiKey)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                { role: 'user', parts: [{ text: combined }] },
+                { role: 'model', parts: [{ functionCall }] },
+                { role: 'function', parts: [{ functionResponse: { name, response: functionResponse } }] }
+              ],
+              tools,
+              generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+            }),
+          });
+          
+          if (geminiRes2.ok) {
+            const geminiJson2 = await geminiRes2.json();
+            const text = (geminiJson2?.candidates?.[0]?.content?.parts || [])
+              .map((p: any) => p?.text)
+              .filter(Boolean)
+              .join('');
+            assistantContent = text.trim() || "Here's what I found about that video.";
+          } else {
+            assistantContent = "I found the video but had trouble analyzing it. Please try again.";
+          }
+        } else {
+          assistantContent = "I tried to look up that video but encountered an issue.";
+        }
+      } else {
+        // No function call, extract text response
+        let fullText = parts
+          .map((p: any) => p?.text)
+          .filter(Boolean)
+          .join('');
+        fullText = String(fullText || '').trim();
+        
+        console.log('[Neria][Gemini] Extracted text length:', fullText.length);
+        assistantContent = fullText || "No response generated. Please try rephrasing your question.";
+      }
+    } catch (error) {
+      console.error('[Neria][Gemini] Fatal error:', error);
+      assistantContent = "I'm having trouble connecting to my analysis engine. Please try asking again in a moment.";
+    }
+
+    // Create a simple non-streaming SSE response
+    const readableStream = new ReadableStream({
+      async start(controller) {
+        try {
+          const initData = { type: 'init', threadId, contextPercentage, model: 'gemini-2.5-pro', inputTokens, maxTokens };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(initData)}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', content: assistantContent })}\n\n`));
+          await supabase.from('chat_messages').insert({ thread_id: threadId, role: 'assistant', content: assistantContent });
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.close();
+        } catch (error) {
+          console.error('[Neria][Gemini] Streaming error:', error);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: 'Streaming failed' })}\n\n`));
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(readableStream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+    
+    // Remove unreachable fallback (was OpenAI streaming path)
+    /*
+    let assistantContent = "";
     const encoder = new TextEncoder();
     const readableStream = new ReadableStream({
       async start(controller) {
@@ -1447,13 +1728,7 @@ export async function POST(request: Request) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'realtime_research', content: 'Fetched up-to-date info.' })}\n\n`));
           }
 
-          for await (const chunk of stream) {
-            const content = chunk.choices[0]?.delta?.content;
-            if (content) {
-              assistantContent += content;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'chunk', content })}\n\n`));
-            }
-          }
+          // (stream loop removed)
 
           // Store the complete assistant message
           await supabase
@@ -1552,15 +1827,7 @@ export async function POST(request: Request) {
           controller.close();
         }
       }
-    });
-
-    return new Response(readableStream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    });*/
   } catch (e: any) {
     console.error("Neria chat error:", e);
     return NextResponse.json({ error: e?.message || "Server error" }, { status: 500 });

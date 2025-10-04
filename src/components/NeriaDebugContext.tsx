@@ -29,6 +29,7 @@ interface NeriaDebugContextProps {
 export default function NeriaDebugContext({ threadId, channelId, isVisible, onClose }: NeriaDebugContextProps) {
   const [debugData, setDebugData] = useState<DebugContextData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'context' | 'messages' | 'raw'>('context');
 
@@ -64,6 +65,41 @@ export default function NeriaDebugContext({ threadId, channelId, isVisible, onCl
       setLoading(false);
     }
   }, [threadId, channelId]);
+
+  const clearHistory = useCallback(async () => {
+    if (!threadId) return;
+    
+    if (!confirm('Clear all chat history for this conversation? This cannot be undone.')) {
+      return;
+    }
+    
+    console.log('Clearing history for thread:', threadId);
+    setClearingHistory(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(`/api/neria/clear-history?threadId=${threadId}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Failed to clear history: ${errorData.error || response.statusText}`);
+      }
+      
+      console.log('History cleared successfully');
+      // Refresh the debug context to show empty messages
+      await fetchDebugContext();
+      
+      // Dispatch event to notify Neria container to refresh UI
+      window.dispatchEvent(new CustomEvent('neria-history-cleared'));
+    } catch (err) {
+      console.error('Clear history error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to clear history');
+    } finally {
+      setClearingHistory(false);
+    }
+  }, [threadId, fetchDebugContext]);
 
   useEffect(() => {
     if (isVisible && threadId && channelId) {
@@ -274,13 +310,22 @@ export default function NeriaDebugContext({ threadId, channelId, isVisible, onCl
           <div className="text-sm text-gray-500">
             {debugData && `Thread ID: ${threadId} | Channel ID: ${channelId}`}
           </div>
-          <button
-            onClick={fetchDebugContext}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
-          >
-            {loading ? 'Refreshing...' : 'Refresh Context'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={clearHistory}
+              disabled={clearingHistory || loading}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm"
+            >
+              {clearingHistory ? 'Clearing...' : 'Clear History'}
+            </button>
+            <button
+              onClick={fetchDebugContext}
+              disabled={loading}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 text-sm"
+            >
+              {loading ? 'Refreshing...' : 'Refresh Context'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

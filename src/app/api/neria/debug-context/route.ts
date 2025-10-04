@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from '@/utils/supabase/server';
 import { createSupabaseAdminClient } from '@/utils/supabase/admin';
 import { getPrompt } from '@/utils/prompts';
 import { getValidAccessToken } from '@/utils/googleAuth';
-import { buildNeriaContextBundle, formatBundleForSystemPrompt } from '@/utils/neria-context';
+import { formatContextForNeria } from '@/utils/context-formatter';
 
 // Simple token counting function (approximation)
 async function countTokens(messages: Array<{ role: string; content: string }>, model: string): Promise<number> {
@@ -254,6 +254,13 @@ async function loadPinnedContext(supabase: any, userId: string, threadId: string
 
 async function checkIsAdmin(supabase: any, userId: string): Promise<boolean> {
   try {
+    // Check email-based admin for development
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.email === 'designcoursecom@gmail.com') {
+      return true;
+    }
+
+    // Also check role-based admin for production
     const { data: roleRow } = await supabase
       .from('google_accounts')
       .select('role_id')
@@ -299,21 +306,33 @@ export async function POST(request: Request) {
     // Assemble messages like in the chat route
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
     messages.push({ role: "system", content: systemPrompt });
-    // Enriched analytics context bundle (facts only), mirror chat route behavior
-    // Only build bundle if not recently cached to avoid heavy API calls:
+    
+    // Use new context-bundle API (same as chat route)
+    let bundleText: string | null = null;
     try {
       if (pinned?.channelMeta?.externalId && pinned?.channelId) {
-        const bundle = await buildNeriaContextBundle({
-          request,
-          channelExternalId: pinned.channelMeta.externalId,
-          internalChannelId: pinned.channelId,
+        const intentParam = 'general';
+        const includeDetail = false;
+        
+        const origin = new URL(request.url).origin;
+        // Always force refresh in debug mode to avoid stale cached context
+        const contextUrl = `${origin}/api/neria/context-bundle?channelId=${encodeURIComponent(pinned.channelMeta.externalId)}&intent=${intentParam}&includeDetail=${includeDetail}&refresh=true`;
+        
+        const contextRes = await fetch(contextUrl, {
+          headers: { cookie: request.headers.get('cookie') || '' },
         });
-        const bundleText = await formatBundleForSystemPrompt(bundle);
+        
+        if (contextRes.ok) {
+          const contextBundle = await contextRes.json();
+          bundleText = formatContextForNeria(contextBundle);
+          console.log('[Neria][DebugContext] Using new context system, tier:', contextBundle.tier);
+        }
+        
         if (bundleText) {
-        messages.push({
-          role: 'system',
-          content: bundleText
-        });
+          messages.push({
+            role: 'system',
+            content: bundleText
+          });
         }
       }
     } catch (e) {

@@ -238,6 +238,17 @@ const NeriaContainer: React.FC = () => {
     }
   }, [threadId]);
 
+  // Listen for history cleared event from debug panel
+  useEffect(() => {
+    const handleHistoryCleared = () => {
+      console.log('[Neria] History cleared event received, refreshing messages');
+      refreshMessages();
+    };
+
+    window.addEventListener('neria-history-cleared', handleHistoryCleared);
+    return () => window.removeEventListener('neria-history-cleared', handleHistoryCleared);
+  }, [refreshMessages]);
+
 
 
   const loadThreadAndMessages = useCallback(async () => {
